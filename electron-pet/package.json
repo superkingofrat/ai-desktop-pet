@@ -1,0 +1,31 @@
+﻿{
+    "name":  "ai-assistant-pet",
+    "version":  "1.0.0",
+    "description":  "桌面宠物 - AI 助手",
+    "main":  "main.js",
+    "scripts":  {
+                    "start":  "electron .",
+                    "pack":  "electron-builder --dir",
+                    "dist":  "electron-builder"
+                },
+    "build":  {
+                  "appId":  "com.ai-assistant.pet",
+                  "productName":  "AI 小助手",
+                  "directories":  {
+                                      "output":  "release"
+                                  },
+                  "win":  {
+                              "target":  [
+                                             "nsis"
+                                         ]
+                          },
+                  "nsis":  {
+                               "oneClick":  false,
+                               "allowToChangeInstallationDirectory":  false
+                           }
+              },
+    "devDependencies":  {
+                            "electron":  "^33.0.0",
+                            "electron-builder":  "^25.0.0"
+                        }
+}

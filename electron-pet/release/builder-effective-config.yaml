@@ -1,0 +1,14 @@
+directories:
+  output: release
+  buildResources: build
+appId: com.ai-assistant.pet
+productName: AI 小助手
+win:
+  target:
+    - nsis
+  icon: null
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: false
+files: []
+electronVersion: 33.4.11

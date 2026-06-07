@@ -1,0 +1,10 @@
+﻿.env
+__pycache__/
+*.pyc
+.idea/
+.vscode/
+venv/
+electron-pet/node_modules/
+node_modules/
+*.log
+*.exe
