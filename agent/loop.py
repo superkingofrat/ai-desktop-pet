@@ -1,4 +1,4 @@
-﻿"""Simplified Agent Loop — the core processing engine."""
+﻿"""Agent Loop — core processing engine with conversation persistence."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ logger = logging.getLogger("assistant.agent.loop")
 
 class AgentLoop:
     """
-    Simplified agent loop that:
+    Agent loop that:
     1. Takes a user message
-    2. Builds context
+    2. Builds context (system prompt + user profile + history)
     3. Calls the LLM (streaming)
     4. Executes tool calls
     5. Returns final response
@@ -45,38 +45,69 @@ class AgentLoop:
         content: str,
         history: list[dict[str, Any]] | None = None,
         personality: str | None = None,
+        *,
+        session_id: str | None = None,
+        conversation_manager: Any | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
-        """
-        Process a user message and yield streaming updates.
+        """Process a user message and yield streaming updates.
 
-        Yields dicts:
-          - {"type": "thinking", "content": "..."}
-          - {"type": "delta", "content": "..."}
-          - {"type": "tool_call", "tool": "...", "args": {...}}
-          - {"type": "tool_result", "tool": "...", "result": "..."}
-          - {"type": "done", "content": "..."}
-          - {"type": "error", "content": "..."}
+        Parameters
+        ----------
+        content : str
+            The user's current message.
+        history : list[dict] | None
+            In-memory message history (fallback when no DB is used).
+        personality : str | None
+            Override the system prompt.
+        session_id : str | None
+            When provided together with *conversation_manager*, history
+            and user profile are loaded from the database instead of
+            the in-memory *history* list.
+        conversation_manager : ConversationManager | None
+            Database-backed manager for persistence.
+
+        Yields
+        ------
+        dicts with keys: type, content / tool / args / result / ...
         """
         tool_defs = self.tools.get_definitions()
 
-        # Build messages
+        # ── Build messages list ──────────────────────────────────
         system_prompt_text = personality or self.SYSTEM_PROMPT
-        system_msg = {"role": "system", "content": system_prompt_text}
-        messages = [system_msg]
-        if history:
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system_prompt_text}
+        ]
+
+        if session_id and conversation_manager:
+            # Inject user profile as a system-level hint
+            profile = conversation_manager.get_user_profile(session_id)
+            if profile:
+                lines = [f"{k}: {v}" for k, v in profile.items()]
+                messages.append({
+                    "role": "system",
+                    "content": "User Profile:\n" + "\n".join(lines),
+                })
+
+            # Load conversation history from DB
+            db_history = conversation_manager.get_history(session_id, limit=10)
+            messages.extend(db_history)
+        elif history:
+            # Fallback: in-memory history list
             messages.extend(history)
+
         messages.append({"role": "user", "content": content})
 
-        # Agent iteration loop (max 10 tool call rounds)
+        # ── Agent iteration loop (max 10 tool-call rounds) ───────
         max_iterations = 10
         iteration = 0
-        final_content = None
+        collected_delta = ""
+        final_content: str | None = None
+        pending_tool_calls = None
 
         while iteration < max_iterations:
             iteration += 1
             yield {"type": "thinking", "content": "思考中..."}
 
-            # Stream the LLM response
             collected_delta = ""
             pending_tool_calls = None
 
@@ -100,8 +131,11 @@ class AgentLoop:
                     return
 
             if pending_tool_calls:
-                # Add assistant message with tool calls
-                assistant_msg = {"role": "assistant", "content": collected_delta or None}
+                # Append assistant message with tool-call metadata
+                assistant_msg: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": collected_delta or None,
+                }
                 tool_call_dicts = []
                 for tc in pending_tool_calls:
                     tool_call_dicts.append({
@@ -112,7 +146,11 @@ class AgentLoop:
                             "arguments": json.dumps(tc["arguments"], ensure_ascii=False),
                         },
                     })
-                    yield {"type": "tool_call", "tool": tc["name"], "args": tc["arguments"]}
+                    yield {
+                        "type": "tool_call",
+                        "tool": tc["name"],
+                        "args": tc["arguments"],
+                    }
                 assistant_msg["tool_calls"] = tool_call_dicts
                 messages.append(assistant_msg)
 
@@ -125,14 +163,31 @@ class AgentLoop:
                         "name": tc["name"],
                         "content": result,
                     })
-                    yield {"type": "tool_result", "tool": tc["name"], "result": result}
+                    yield {
+                        "type": "tool_result",
+                        "tool": tc["name"],
+                        "result": result,
+                    }
             else:
                 # No tool calls — this is the final response
                 final_content = collected_delta
                 yield {"type": "done", "content": final_content}
+
+                # Persist user message + assistant response
+                if session_id and conversation_manager:
+                    conversation_manager.add_message(session_id, "user", content)
+                    conversation_manager.add_message(
+                        session_id, "assistant", final_content or ""
+                    )
                 return
 
         # Max iterations reached
         if final_content is None:
             final_content = collected_delta or "已完成处理，但没有更多需要回复的内容。"
             yield {"type": "done", "content": final_content}
+
+            if session_id and conversation_manager:
+                conversation_manager.add_message(session_id, "user", content)
+                conversation_manager.add_message(
+                    session_id, "assistant", final_content
+                )
