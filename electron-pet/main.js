@@ -1,4 +1,5 @@
-﻿const { app, BrowserWindow, ipcMain } = require("electron");
+﻿const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const fs = require("fs");
 const path = require("path");
 
 let petWindow = null;
@@ -117,6 +118,47 @@ ipcMain.handle("move-pet", (_, dx, dy) => {
 ipcMain.handle("set-pet-position", (_, x, y) => {
   if (!petWindow) return;
   petWindow.setPosition(x, y);
+});
+
+
+
+// IPC: select and read an image file
+ipcMain.handle("select-image-file", async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ["openFile"],
+    filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "gif", "webp", "bmp"] }],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  const filePath = result.filePaths[0];
+  const ext = path.extname(filePath).slice(1).toLowerCase();
+  const mimeMap = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp", bmp: "image/bmp" };
+  const mime = mimeMap[ext] || "image/png";
+  const buffer = fs.readFileSync(filePath);
+  const b64 = buffer.toString("base64");
+  return { path: filePath, dataUrl: `data:${mime};base64,${b64}` };
+});
+
+
+// IPC: update pet window settings (image, name) from chat
+ipcMain.handle("update-pet-settings", () => {
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.webContents.executeJavaScript(`
+      var img = localStorage.getItem("pet_image");
+      var name = localStorage.getItem("pet_name");
+      var pe = document.getElementById("petEmoji");
+      var pc = document.getElementById("petCustomImage");
+      var pa = document.getElementById("petAvatar");
+      if (img && img.startsWith("data:")) {
+        if (pe) pe.style.display = "none";
+        if (pc) { pc.style.display = "inline"; pc.src = img; }
+        if (pa) pa.classList.add("has-image");
+      } else {
+        if (pe) pe.style.display = "inline";
+        if (pc) pc.style.display = "none";
+        if (pa) pa.classList.remove("has-image");
+      }
+    `);
+  }
 });
 
 app.whenReady().then(createPetWindow);

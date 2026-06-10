@@ -1,4 +1,4 @@
-﻿"""AI Assistant Backend - FastAPI + WebSocket + Agent Loop + Tool System"""
+﻿"""AI Assistant Backend — FastAPI + WebSocket server."""
 
 from __future__ import annotations
 
@@ -31,16 +31,19 @@ _agent_loop = None
 async def lifespan(app: FastAPI):
     global _bus, _provider, _agent_loop
 
+    # ── Trigger auto-registration of all BaseTool subclasses ──
+    import agent.tools  # noqa: F401 — fires __init_subclass__ hooks
+
     from bus.queue import MessageBus
     from providers.deepseek_provider import DeepSeekProvider
     from agent.loop import AgentLoop
-    from agent.tools.add_todo import AddTodoTool
 
     _bus = MessageBus()
     _provider = DeepSeekProvider()
     _agent_loop = AgentLoop(bus=_bus, provider=_provider)
-    _agent_loop.tools.register(AddTodoTool())
-    logger.info("Registered tools: %s", _agent_loop.tools.tool_names)
+
+    # Tools are auto-registered via BaseTool.__init_subclass__
+    logger.info("Auto-registered tools: %s", _agent_loop.tools.tool_names)
     logger.info("AI Assistant backend started")
     yield
     logger.info("AI Assistant backend shutting down")
@@ -104,8 +107,11 @@ async def ws_chat(websocket: WebSocket):
                 continue
 
             collected_parts: list[str] = []
+            personality = data.get("personality") or ""
 
-            async for event in _agent_loop.process_message_stream(content, history=history):
+            async for event in _agent_loop.process_message_stream(
+                content, history=history, personality=personality
+            ):
                 if event["type"] == "thinking":
                     await websocket.send_text(json.dumps({
                         "type": "thinking", "content": event["content"],
@@ -142,11 +148,13 @@ async def ws_chat(websocket: WebSocket):
     except Exception as e:
         logger.exception("[WS] Error: %s", e)
         try:
-            await websocket.send_text(json.dumps({"type": "error", "content": f"Server error: {e}"}))
+            await websocket.send_text(json.dumps({
+                "type": "error", "content": f"Server error: {e}",
+            }))
         except Exception:
             pass
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=False)

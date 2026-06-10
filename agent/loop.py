@@ -44,6 +44,7 @@ class AgentLoop:
         self,
         content: str,
         history: list[dict[str, Any]] | None = None,
+        personality: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """
         Process a user message and yield streaming updates.
@@ -59,7 +60,8 @@ class AgentLoop:
         tool_defs = self.tools.get_definitions()
 
         # Build messages
-        system_msg = {"role": "system", "content": self.SYSTEM_PROMPT}
+        system_prompt_text = personality or self.SYSTEM_PROMPT
+        system_msg = {"role": "system", "content": system_prompt_text}
         messages = [system_msg]
         if history:
             messages.extend(history)

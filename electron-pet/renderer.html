@@ -43,6 +43,20 @@ body {
   transition: transform 0.2s ease;
 }
 .pet-avatar:hover { transform: scale(1.1); }
+.pet-avatar.has-image {
+  background: transparent !important;
+  box-shadow: none !important;
+  width: auto !important;
+  height: auto !important;
+  padding: 0;
+}
+.pet-avatar.has-image #petCustomImage {
+  width: 72px !important;
+  height: 72px !important;
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline !important;
+}
 .pet-avatar:active { transform: scale(0.95); }
 .status-dot {
   width: 12px; height: 12px; border-radius: 50%;
@@ -70,7 +84,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  background: #1a1a2e;
   color: #fff;
   border-radius: 16px 16px 0 0;
   -webkit-app-region: drag;
@@ -207,16 +221,94 @@ body {
 .connect-bar {
   text-align: center;
   font-size: 10px;
-  padding: 3px 0;
-  color: #9ca3af;
+  padding: 4px 0;
+  background: #ffffff;
+  color: #6b7280;
+  border-bottom: 1px solid #e5e7eb;
 }
-.connect-bar.connected { color: #34d399; }
-.connect-bar.disconnected { color: #f87171; }
+.connect-bar.connected { color: #059669; }
+.connect-bar.disconnected { color: #dc2626; font-weight: 500; }
 
 @media (max-width: 360px) {
   .chat-body { padding: 10px; }
   .msg { max-width: 92%; font-size: 12px; }
 }
+
+/* ===== Settings Panel ===== */
+#settings-overlay {
+  display: none;
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(255,255,255,0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 100;
+  flex-direction: column;
+  border-radius: 16px;
+}
+#settings-overlay.show { display: flex; }
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #1a1a2e;
+  color: #fff;
+  border-radius: 16px 16px 0 0;
+  flex-shrink: 0;
+}
+.settings-header span { font-size: 14px; font-weight: 600; }
+.settings-close {
+  width: 26px; height: 26px; border-radius: 50%; border: none;
+  background: rgba(255,255,255,0.2); color: #fff; font-size: 13px;
+  cursor: pointer; transition: background 0.2s;
+}
+.settings-close:hover { background: rgba(255,255,255,0.35); }
+
+.settings-body {
+  flex: 1; overflow-y: auto; padding: 16px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.settings-body label {
+  font-size: 13px; font-weight: 600; color: #374151; display: block; margin-bottom: 6px;
+}
+.settings-body textarea {
+  width: 100%; min-height: 80px; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 10px; font-size: 13px; resize: vertical; outline: none;
+  font-family: inherit; line-height: 1.5;
+}
+.settings-body textarea:focus { border-color: #f093fb; }
+
+.image-preview-area {
+  display: flex; align-items: center; gap: 12px;
+}
+.image-preview-area img {
+  width: 56px; height: 56px; border-radius: 50%; object-fit: cover;
+  border: 2px solid #e5e7eb;
+}
+.image-preview-area .emoji-placeholder {
+  width: 56px; height: 56px; border-radius: 50%;
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px;
+}
+.image-btn {
+  padding: 8px 14px; border-radius: 10px; border: 1px solid #d1d5db;
+  background: #fff; font-size: 12px; cursor: pointer; color: #374151;
+  transition: background 0.2s;
+}
+.image-btn:hover { background: #f9fafb; }
+
+.save-btn {
+  width: 100%; padding: 10px; border: none; border-radius: 12px;
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: opacity 0.2s;
+}
+.save-btn:hover { opacity: 0.9; }
+.save-btn:active { opacity: 0.8; }
+
 </style>
 </head>
 <body>
@@ -224,7 +316,8 @@ body {
 <!-- ===== Pet View ===== -->
 <div id="pet-view">
   <div class="pet-avatar" id="petAvatar">
-    <span style="font-size:36px">🐱</span>
+    <span id="petEmoji" style="font-size:36px">🐱</span>
+    <img id="petCustomImage" style="display:none;width:36px;height:36px;border-radius:50%;object-fit:cover;">
     <span class="status-dot" id="statusDot"></span>
   </div>
 </div>
@@ -233,9 +326,11 @@ body {
 <div id="chat-view">
   <div class="chat-header" id="chatHeader">
     <div class="chat-header-title">
-      <span class="emoji">🐱</span>
-      <span>AI 小助手</span>
+      <span class="emoji" id="chatEmoji">🐱</span>
+      <img id="chatCustomImage" style="display:none;width:18px;height:18px;border-radius:50%;object-fit:cover;vertical-align:middle;">
+      <span id="chatTitle">AI 小助手</span>
     </div>
+    <button class="chat-close" id="settingsBtn" title="设置" style="margin-right:4px;">⚙</button>
     <button class="chat-close" id="chatClose" title="关闭">✕</button>
   </div>
   <div class="connect-bar" id="connectBar">连接中...</div>
@@ -246,7 +341,35 @@ body {
     <input type="text" id="chatInput" placeholder="输入消息..." autocomplete="off">
     <button id="sendBtn">➤</button>
   </div>
-</div>
+
+  <!-- ===== Settings Overlay ===== -->
+  <div id="settings-overlay">
+    <div class="settings-header">
+      <span>⚙ 设置</span>
+      <button class="settings-close" id="settingsClose">✕</button>
+    </div>
+    <div class="settings-body">
+      <div>
+        <label for="personalityInput">🧠 个性设定</label>
+        <textarea id="personalityInput" placeholder="例如：你是一个幽默风趣的助手，喜欢用表情包和段子回复。"></textarea>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px;">留空使用默认性格</div>
+      </div>
+      <div>
+        <label for="nameInput">🏷️ 宠物昵称</label>
+        <input type="text" id="nameInput" placeholder="AI 小助手" style="width:100%;border:1px solid #e5e7eb;border-radius:10px;padding:10px;font-size:13px;outline:none;">
+      </div>
+      <div>
+        <label>🐱 宠物形象</label>
+        <div class="image-preview-area">
+          <div class="emoji-placeholder" id="settingsEmoji">🐱</div>
+          <img id="settingsImagePreview" style="display:none;">
+          <button class="image-btn" id="selectImageBtn">选择图片</button>
+          <button class="image-btn" id="resetImageBtn" style="display:none;">重置</button>
+        </div>
+      </div>
+      <button class="save-btn" id="settingsSave">💾 保存设置</button>
+    </div>
+  </div>
 
 <script>
 (function () {
@@ -256,6 +379,108 @@ body {
 
   if (isChatView) {
     // ===== Chat View =====
+    // Apply saved name
+    var savedName = localStorage.getItem("pet_name");
+    if (savedName) { var ct = document.getElementById("chatTitle"); if (ct) ct.textContent = savedName; }
+
+    // ===== Settings =====
+    const settingsBtn = document.getElementById("settingsBtn");
+    const settingsOverlay = document.getElementById("settings-overlay");
+    const settingsClose = document.getElementById("settingsClose");
+    const personalityInput = document.getElementById("personalityInput");
+    const nameInput = document.getElementById("nameInput");
+    const selectImageBtn = document.getElementById("selectImageBtn");
+    const resetImageBtn = document.getElementById("resetImageBtn");
+    const settingsImagePreview = document.getElementById("settingsImagePreview");
+    const settingsEmoji = document.getElementById("settingsEmoji");
+    const settingsSave = document.getElementById("settingsSave");
+    const petEmoji = document.getElementById("petEmoji");
+    const petCustomImage = document.getElementById("petCustomImage");
+    const chatEmoji = document.getElementById("chatEmoji");
+    const chatCustomImage = document.getElementById("chatCustomImage");
+
+    let pendingImageData = null;
+
+    function loadSettings() {
+      const personality = localStorage.getItem("pet_personality") || "";
+      const imageData = localStorage.getItem("pet_image") || null;
+      const name = localStorage.getItem("pet_name") || "";
+      personalityInput.value = personality;
+      if (document.getElementById("nameInput")) document.getElementById("nameInput").value = name;
+      applyPetImage(imageData);
+      pendingImageData = null;
+    }
+
+    function applyPetImage(dataUrl) {
+      const showImage = dataUrl && dataUrl.startsWith("data:");
+      // Chat header image
+      chatEmoji.style.display = showImage ? "none" : "inline";
+      if (chatCustomImage) {
+        chatCustomImage.style.display = showImage ? "inline" : "none";
+        if (showImage) chatCustomImage.src = dataUrl;
+      }
+      // Settings preview
+      settingsEmoji.style.display = showImage ? "none" : "flex";
+      settingsImagePreview.style.display = showImage ? "inline" : "none";
+      if (showImage) settingsImagePreview.src = dataUrl;
+      resetImageBtn.style.display = showImage ? "inline" : "none";
+    }
+
+    function getPetName() {
+      return localStorage.getItem("pet_name") || "AI 小助手";
+    }
+    function getPersonality() {
+      return localStorage.getItem("pet_personality") || "";
+    }
+
+    // Load saved settings on startup
+    loadSettings();
+
+    // Settings button
+    settingsBtn.addEventListener("click", function () {
+      loadSettings();
+      settingsOverlay.classList.add("show");
+    });
+
+    settingsClose.addEventListener("click", function () {
+      settingsOverlay.classList.remove("show");
+    });
+
+    selectImageBtn.addEventListener("click", async function () {
+      if (window.electronAPI && window.electronAPI.selectImageFile) {
+        const result = await window.electronAPI.selectImageFile();
+        if (result && result.dataUrl) {
+          pendingImageData = result.dataUrl;
+          applyPetImage(result.dataUrl);
+        }
+      }
+    });
+
+    resetImageBtn.addEventListener("click", function () {
+      pendingImageData = null;
+      localStorage.removeItem("pet_image");
+      applyPetImage(null);
+    });
+
+    settingsSave.addEventListener("click", function () {
+      const personality = personalityInput.value.trim();
+      const name = nameInput ? nameInput.value.trim() : "";
+      localStorage.setItem("pet_personality", personality);
+      localStorage.setItem("pet_name", name);
+      if (pendingImageData) {
+        localStorage.setItem("pet_image", pendingImageData);
+        pendingImageData = null;
+      }
+      // Update chat header title
+      var titleEl = document.getElementById("chatTitle");
+      if (titleEl) titleEl.textContent = name || "AI 小助手";
+      // Notify pet window to update
+      if (window.electronAPI && window.electronAPI.updatePetSettings) {
+        window.electronAPI.updatePetSettings();
+      }
+      settingsOverlay.classList.remove("show");
+    });
+
     document.getElementById("pet-view").classList.add("hidden");
     document.getElementById("chat-view").classList.add("show");
 
@@ -426,7 +651,12 @@ body {
       if (!text.trim() || !ws || ws.readyState !== WebSocket.OPEN) return;
       if (isStreaming) finalizeStream();
       addMsg(escapeHtml(text), "user");
-      ws.send(JSON.stringify({ content: text }));
+      var personality = getPersonality();
+      var msgData = { content: text };
+      if (personality) msgData.personality = personality;
+      var petName = getPetName();
+      if (petName !== 'AI 小助手') msgData.pet_name = petName;
+      ws.send(JSON.stringify(msgData));
       chatInput.value = "";
       chatInput.focus();
     }
@@ -457,6 +687,21 @@ body {
 
   } else {
     // ===== Pet View =====
+    // Load saved settings
+    (function() {
+      var name = localStorage.getItem("pet_name");
+      if (name) { var pt = document.getElementById("pet"); if (pt) pt.title = name; }
+      var img = localStorage.getItem("pet_image");
+      if (img && img.startsWith("data:")) {
+        var pe = document.getElementById("petEmoji");
+        var pc = document.getElementById("petCustomImage");
+        var pa = document.getElementById("petAvatar");
+        if (pe) pe.style.display = "none";
+        if (pc) { pc.style.display = "inline"; pc.src = img; }
+        if (pa) pa.classList.add("has-image");
+      }
+    })();
+
     const petAvatar = document.getElementById("petAvatar");
     petAvatar.addEventListener("click", function () {
       if (window.electronAPI && window.electronAPI.toggleChat) {
