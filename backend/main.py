@@ -1,4 +1,4 @@
-﻿"""AI Assistant Backend — FastAPI + WebSocket server with conversation persistence."""
+﻿"""AI Assistant Backend — FastAPI + WebSocket with streaming toggle + semantic cache."""
 
 from __future__ import annotations
 
@@ -27,13 +27,13 @@ _provider = None
 _agent_loop = None
 _db = None
 _cm = None
+_cache = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _bus, _provider, _agent_loop, _db, _cm
+    global _bus, _provider, _agent_loop, _db, _cm, _cache
 
-    # ── Trigger auto-registration of BaseTool subclasses ──
     import agent.tools  # noqa: F401
 
     from bus.queue import MessageBus
@@ -41,16 +41,18 @@ async def lifespan(app: FastAPI):
     from agent.loop import AgentLoop
     from db.database import Database
     from db.models import ConversationManager
+    from cache.semantic_cache import SemanticCache
 
     _db = Database()
     _cm = ConversationManager(_db)
+    _cache = SemanticCache()
 
     _bus = MessageBus()
     _provider = DeepSeekProvider()
     _agent_loop = AgentLoop(bus=_bus, provider=_provider)
 
     logger.info("Auto-registered tools: %s", _agent_loop.tools.tool_names)
-    logger.info("AI Assistant backend started")
+    logger.info("AI Assistant backend started  (cache=%s)", _cache is not None)
     yield
     logger.info("AI Assistant backend shutting down")
     _agent_loop = None
@@ -58,6 +60,7 @@ async def lifespan(app: FastAPI):
     _bus = None
     _cm = None
     _db = None
+    _cache = None
 
 
 app = FastAPI(title="AI Assistant", version="0.1.0", lifespan=lifespan)
@@ -84,11 +87,11 @@ async def ws_chat(
     websocket: WebSocket,
     session_id: str = Query(default="default"),
 ):
-    """WebSocket chat endpoint with streaming response.
+    """WebSocket chat endpoint with configurable streaming.
 
-    Query parameter ``session_id`` identifies the conversation.
-    All messages are persisted via ``ConversationManager`` so that
-    history and user profile survive across reconnects.
+    Client can set ``{"stream": true}`` in the message body to receive
+    per-token updates (``token`` events).  Without it (default), the
+    complete response is sent as a single ``reply`` event.
     """
     if _agent_loop is None or _cm is None:
         await websocket.close(code=1013, reason="Service not initialized")
@@ -105,67 +108,107 @@ async def ws_chat(
             if not content:
                 continue
 
-            # Honour the session_id sent in the first message body
             if data.get("session_id"):
                 session_id = data["session_id"]
 
-            logger.info("[WS] Received  session=%s  content=%.60s", session_id, content)
-
-            # ── Special commands (no LLM) ──────────────────────────
-            if content == "/new":
-                continue  # simply ignore; old history is still in DB
+            stream = data.get("stream", False)
+            logger.info(
+                "[WS] Received  session=%s  stream=%s  content=%.60s",
+                session_id, stream, content,
+            )
 
             if content == "/help":
                 await websocket.send_text(json.dumps({
                     "type": "reply",
-                    "content": "Commands:\n/help - Show help",
+                    "content": "Commands:\n/help - Show help\n/clear - Clear cache",
                 }))
                 continue
 
-            # ── Normal flow: stream through the agent ──────────────
-            collected_parts: list[str] = []
+            if content == "/clear" and _cache:
+                _cache.clear()
+                await websocket.send_text(json.dumps({
+                    "type": "reply",
+                    "content": "Cache cleared.",
+                }))
+                continue
+
+            # ── Stream or batch ──────────────────────────────────
             personality = data.get("personality") or ""
+            collected_parts: list[str] = []
 
             async for event in _agent_loop.process_message_stream(
                 content,
                 personality=personality,
                 session_id=session_id,
                 conversation_manager=_cm,
+                semantic_cache=_cache,
             ):
-                if event["type"] == "thinking":
-                    await websocket.send_text(json.dumps({
-                        "type": "thinking",
-                        "content": event["content"],
-                    }))
-                elif event["type"] == "delta":
-                    collected_parts.append(event["content"])
-                    await websocket.send_text(json.dumps({
-                        "type": "delta",
-                        "content": event["content"],
-                    }))
-                elif event["type"] == "tool_call":
-                    await websocket.send_text(json.dumps({
-                        "type": "tool_call",
-                        "tool": event["tool"],
-                        "args": event["args"],
-                    }))
-                elif event["type"] == "tool_result":
-                    await websocket.send_text(json.dumps({
-                        "type": "tool_result",
-                        "tool": event["tool"],
-                        "result": event["result"],
-                    }))
-                elif event["type"] == "done":
-                    final = event.get("content", "") or "".join(collected_parts)
-                    await websocket.send_text(json.dumps({
-                        "type": "done",
-                        "content": final,
-                    }))
-                elif event["type"] == "error":
-                    await websocket.send_text(json.dumps({
-                        "type": "error",
-                        "content": event["content"],
-                    }))
+                if stream:
+                    # ── Streaming mode: send every chunk ─────
+                    if event["type"] == "delta":
+                        collected_parts.append(event["content"])
+                        await websocket.send_text(json.dumps({
+                            "type": "token",
+                            "content": event["content"],
+                        }))
+                    elif event["type"] == "thinking":
+                        await websocket.send_text(json.dumps({
+                            "type": "thinking",
+                            "content": event["content"],
+                        }))
+                    elif event["type"] == "tool_call":
+                        await websocket.send_text(json.dumps({
+                            "type": "tool_call",
+                            "tool": event["tool"],
+                            "args": event["args"],
+                        }))
+                    elif event["type"] == "tool_result":
+                        await websocket.send_text(json.dumps({
+                            "type": "tool_result",
+                            "tool": event["tool"],
+                            "result": event["result"],
+                        }))
+                    elif event["type"] == "done":
+                        final = event.get("content", "") or "".join(collected_parts)
+                        await websocket.send_text(json.dumps({
+                            "type": "done",
+                            "content": final,
+                        }))
+                    elif event["type"] == "error":
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "content": event["content"],
+                        }))
+                else:
+                    # ── Batch mode: collect and send once ────
+                    if event["type"] == "delta":
+                        collected_parts.append(event["content"])
+                    elif event["type"] == "thinking":
+                        pass  # silent in batch mode
+                    elif event["type"] == "tool_call":
+                        # Notify but don't stream content
+                        await websocket.send_text(json.dumps({
+                            "type": "tool_call",
+                            "tool": event["tool"],
+                            "args": event["args"],
+                        }))
+                    elif event["type"] == "tool_result":
+                        await websocket.send_text(json.dumps({
+                            "type": "tool_result",
+                            "tool": event["tool"],
+                            "result": event["result"],
+                        }))
+                    elif event["type"] == "done":
+                        final = event.get("content", "") or "".join(collected_parts)
+                        await websocket.send_text(json.dumps({
+                            "type": "reply",
+                            "content": final,
+                        }))
+                    elif event["type"] == "error":
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "content": event["content"],
+                        }))
 
     except WebSocketDisconnect:
         logger.info("[WS] Disconnected  session=%s", session_id)

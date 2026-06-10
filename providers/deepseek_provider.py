@@ -1,4 +1,4 @@
-"""DeepSeek LLM provider with streaming support."""
+﻿"""DeepSeek LLM provider with streaming support."""
 
 from __future__ import annotations
 
@@ -167,6 +167,37 @@ class DeepSeekProvider:
         except Exception as e:
             logger.error("LLM stream failed: %s", e)
             yield {"type": "error", "content": f"Stream error: {e}"}
+
+    async def generate_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Higher-level streaming: yield ``delta``, ``tool_calls``, ``done``, ``error`` events.
+
+        Differs from ``chat_stream`` only in that it is an official
+        part of the ``BaseProvider`` interface and includes additional
+        metadata in the ``done`` event.
+        """
+        full_text = ""
+        final_tool_calls = None
+
+        async for chunk in self.chat_stream(
+            messages=messages, tools=tools, model=model, **kwargs
+        ):
+            if chunk["type"] == "delta":
+                full_text += chunk["content"]
+                yield chunk
+            elif chunk["type"] == "tool_calls":
+                final_tool_calls = chunk["tool_calls"]
+                yield chunk
+            elif chunk["type"] == "done":
+                yield {"type": "done", "content": full_text, "finish_reason": chunk.get("finish_reason")}
+            elif chunk["type"] == "error":
+                yield chunk
+                return
 
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse a non-streaming response."""

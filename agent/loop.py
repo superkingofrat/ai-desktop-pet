@@ -1,4 +1,4 @@
-﻿"""Agent Loop — core processing engine with conversation persistence."""
+﻿"""Agent Loop — core processing engine with conversation persistence and semantic cache."""
 
 from __future__ import annotations
 
@@ -18,9 +18,11 @@ class AgentLoop:
     Agent loop that:
     1. Takes a user message
     2. Builds context (system prompt + user profile + history)
-    3. Calls the LLM (streaming)
-    4. Executes tool calls
-    5. Returns final response
+    3. Checks semantic cache — hit → return directly
+    4. Calls the LLM (streaming)
+    5. Executes tool calls
+    6. Stores result in cache
+    7. Returns final response
     """
 
     SYSTEM_PROMPT = """你是一个有用的 AI 助手。
@@ -39,6 +41,7 @@ class AgentLoop:
         self.provider = provider
         self.model = model or provider.get_default_model()
         self.tools = ToolRegistry()
+        self._cache = None  # lazy-attached via process_message_stream
 
     async def process_message_stream(
         self,
@@ -48,6 +51,7 @@ class AgentLoop:
         *,
         session_id: str | None = None,
         conversation_manager: Any | None = None,
+        semantic_cache: Any | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Process a user message and yield streaming updates.
 
@@ -65,10 +69,8 @@ class AgentLoop:
             the in-memory *history* list.
         conversation_manager : ConversationManager | None
             Database-backed manager for persistence.
-
-        Yields
-        ------
-        dicts with keys: type, content / tool / args / result / ...
+        semantic_cache : SemanticCache | None
+            Cache for semantically similar queries (embedding-based).
         """
         tool_defs = self.tools.get_definitions()
 
@@ -92,15 +94,25 @@ class AgentLoop:
             db_history = conversation_manager.get_history(session_id, limit=10)
             messages.extend(db_history)
         elif history:
-            # Fallback: in-memory history list
             messages.extend(history)
 
         messages.append({"role": "user", "content": content})
 
+        # ── Semantic cache check ─────────────────────────────────
+        if semantic_cache is not None:
+            cached = semantic_cache.lookup(content)
+            if cached is not None:
+                logger.info("Cache hit for: %.50s", content)
+                yield {"type": "thinking", "content": "命中缓存，直接返回结果..."}
+                yield {"type": "done", "content": cached}
+                if session_id and conversation_manager:
+                    conversation_manager.add_message(session_id, "user", content)
+                    conversation_manager.add_message(session_id, "assistant", cached)
+                return
+
         # ── Agent iteration loop (max 10 tool-call rounds) ───────
         max_iterations = 10
         iteration = 0
-        collected_delta = ""
         final_content: str | None = None
         pending_tool_calls = None
 
@@ -131,7 +143,6 @@ class AgentLoop:
                     return
 
             if pending_tool_calls:
-                # Append assistant message with tool-call metadata
                 assistant_msg: dict[str, Any] = {
                     "role": "assistant",
                     "content": collected_delta or None,
@@ -146,15 +157,10 @@ class AgentLoop:
                             "arguments": json.dumps(tc["arguments"], ensure_ascii=False),
                         },
                     })
-                    yield {
-                        "type": "tool_call",
-                        "tool": tc["name"],
-                        "args": tc["arguments"],
-                    }
+                    yield {"type": "tool_call", "tool": tc["name"], "args": tc["arguments"]}
                 assistant_msg["tool_calls"] = tool_call_dicts
                 messages.append(assistant_msg)
 
-                # Execute each tool call
                 for tc in pending_tool_calls:
                     result = await self.tools.execute(tc["name"], tc["arguments"])
                     messages.append({
@@ -163,22 +169,20 @@ class AgentLoop:
                         "name": tc["name"],
                         "content": result,
                     })
-                    yield {
-                        "type": "tool_result",
-                        "tool": tc["name"],
-                        "result": result,
-                    }
+                    yield {"type": "tool_result", "tool": tc["name"], "result": result}
             else:
-                # No tool calls — this is the final response
                 final_content = collected_delta
                 yield {"type": "done", "content": final_content}
 
-                # Persist user message + assistant response
+                # Persist
                 if session_id and conversation_manager:
                     conversation_manager.add_message(session_id, "user", content)
-                    conversation_manager.add_message(
-                        session_id, "assistant", final_content or ""
-                    )
+                    conversation_manager.add_message(session_id, "assistant", final_content or "")
+
+                # Cache the result (only cache non-tool final answers)
+                if semantic_cache is not None and final_content:
+                    semantic_cache.store(content, final_content)
+
                 return
 
         # Max iterations reached
@@ -188,6 +192,7 @@ class AgentLoop:
 
             if session_id and conversation_manager:
                 conversation_manager.add_message(session_id, "user", content)
-                conversation_manager.add_message(
-                    session_id, "assistant", final_content
-                )
+                conversation_manager.add_message(session_id, "assistant", final_content)
+
+            if semantic_cache is not None and final_content and not pending_tool_calls:
+                semantic_cache.store(content, final_content)
