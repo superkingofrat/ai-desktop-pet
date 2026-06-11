@@ -127,7 +127,11 @@ class ChatDialog(QDialog):
             "QPushButton:hover { background:rgba(0,0,0,0.2); }"
         )
         self._close_btn.clicked.connect(self.close)
+        self._stream_cb = QCheckBox("Stream")
+        self._stream_cb.setChecked(True)
+        self._stream_cb.setStyleSheet("font-size:11px; color:#666;")
         hdr.addWidget(title, 1)
+        hdr.addWidget(self._stream_cb)
         hdr.addWidget(self._close_btn)
         layout.addLayout(hdr)
 
