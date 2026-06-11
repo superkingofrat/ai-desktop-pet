@@ -1,4 +1,4 @@
-﻿"""Chat widget — message display, input, streaming support, and stream toggle."""
+"""Chat widget — message display, input, streaming support, and stream toggle."""
 from __future__ import annotations
 
 from PyQt5.QtCore import QCoreApplication, QObject, pyqtSignal, Qt

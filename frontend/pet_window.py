@@ -303,17 +303,26 @@ class PetWindow(QMainWindow):
         g.start(QAbstractAnimation.DeleteWhenStopped)
 
     def _toggle_chat(self):
-        if self._chat is not None and self._chat.isVisible():
-            self._chat.close()
-            self._chat.deleteLater()
-            self._chat = None
-        else:
-            self._chat = ChatDialog(self.geometry().topLeft())
-            self._chat.destroyed.connect(self._on_chat_destroyed)
-            self._chat.show()
+        # Close existing chat
+        if self._chat is not None:
+            old = self._chat
+            self._chat = None  # clear FIRST so _on_click can't re-enter
+            old.close()
+            old.deleteLater()
+            return
+
+        # Create new chat (use local var to avoid race with destroyed signal)
+        dlg = ChatDialog(self.geometry().topLeft())
+        dlg.destroyed.connect(self._on_chat_destroyed)
+        dlg.show()
+        self._chat = dlg
 
     def _on_chat_destroyed(self):
-        self._chat = None
+        try:
+            if self._chat is not None and hasattr(self._chat, 'isVisible') and not self._chat.isVisible():
+                self._chat = None
+        except (RuntimeError, Exception):
+            self._chat = None
 
     # -- Context menu ----------------------------------------------
 
