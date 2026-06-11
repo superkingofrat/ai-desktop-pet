@@ -1,9 +1,7 @@
-"""Desktop pet window — transparent, draggable, with chat dialog."""
+"""Desktop pet window — transparent, draggable, with day/night switching and chat."""
 
 from __future__ import annotations
 
-import json
-import re
 from pathlib import Path
 
 from PyQt5.QtCore import (
@@ -21,25 +19,22 @@ from PyQt5.QtCore import (
     pyqtSignal,
 )
 from PyQt5.QtGui import QColor, QPainter, QPixmap
-from PyQt5.QtWebSockets import QWebSocket
 from PyQt5.QtNetwork import QAbstractSocket
+from PyQt5.QtWebSockets import QWebSocket
 from PyQt5.QtWidgets import (
     QApplication,
-    QCheckBox,
     QDialog,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMenu,
     QPushButton,
-    QTextBrowser,
     QVBoxLayout,
-    QWidget,
 )
 
+from frontend.widgets.chat_widget import ChatWidget
 
-IMG_DIR = Path(__file__).resolve().parent / "images"
+IMG_DIR = Path(__file__).resolve().parent.parent / "images"
 SIZE = QSize(120, 120)
 WS_URL = "ws://127.0.0.1:8000/ws/chat?session_id=pet-desktop"
 
@@ -80,187 +75,130 @@ class _PetLabel(QLabel):
 
 
 # ====================================================================
-# Chat dialog
+# Chat dialog (standalone window, no parent)
 # ====================================================================
 
+CHAT_W = 340
+CHAT_H = 460
+
+
 class ChatDialog(QDialog):
-    """Frameless chat window that connects to the backend via WebSocket."""
+    """Frameless chat popup using existing ChatWidget + QWebSocket."""
 
-    CHAT_SIZE = QSize(340, 440)
-
-    def __init__(self, pet_pos: QPoint, parent=None):
-        super().__init__(parent)
+    def __init__(self, pet_pos: QPoint):
+        super().__init__()  # IMPORTANT: no parent — avoid auto-close on parent click
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(self.CHAT_SIZE)
-        self.setStyleSheet("""
-            QDialog { background: rgba(255,255,255,0.95); border-radius: 16px; }
-        """)
+        self.setFixedSize(CHAT_W, CHAT_H)
+        self.setStyleSheet(
+            "QDialog { background: rgba(255,255,255,0.95); border-radius: 16px; }"
+        )
 
         # Position to the left of the pet
-        cx, cy = pet_pos.x(), pet_pos.y()
-        dx = max(0, cx - self.CHAT_SIZE.width() + 20)
-        dy = max(0, cy - self.CHAT_SIZE.height() + 60)
-        self.move(dx, dy)
+        x = max(0, pet_pos.x() - CHAT_W + 20)
+        y = max(0, pet_pos.y() - CHAT_H + 60)
+        self.move(x, y)
 
         # ── Layout ──────────────────────────────────────────
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         # Header
         hdr = QHBoxLayout()
-        title = QLabel("AI 小助手")
-        title.setStyleSheet("font-weight:600; color:#1a1a2e;")
-        close_btn = QPushButton("\u2715")
-        close_btn.setFixedSize(26, 26)
-        close_btn.setCursor(Qt.PointingHandCursor)
-        close_btn.setStyleSheet(
+        hdr.setContentsMargins(12, 10, 12, 4)
+        title = QLabel("AI \u5c0f\u52a9\u624b")
+        title.setStyleSheet("font-weight:600; color:#1a1a2e; font-size:13px;")
+        self._close_btn = QPushButton("\u2715")
+        self._close_btn.setFixedSize(26, 26)
+        self._close_btn.setCursor(Qt.PointingHandCursor)
+        self._close_btn.setStyleSheet(
             "QPushButton { border:none; border-radius:13px; "
             "background:rgba(0,0,0,0.1); font-size:13px; }"
             "QPushButton:hover { background:rgba(0,0,0,0.2); }"
         )
-        close_btn.clicked.connect(self.close)
+        self._close_btn.clicked.connect(self.close)
         hdr.addWidget(title, 1)
-        hdr.addWidget(close_btn)
+        hdr.addWidget(self._close_btn)
         layout.addLayout(hdr)
 
-        # Chat browser
-        self.browser = QTextBrowser()
-        self.browser.setOpenExternalLinks(True)
-        self.browser.setReadOnly(True)
-        self.browser.setStyleSheet("QTextBrowser { border: none; background: transparent; }")
-        layout.addWidget(self.browser, 1)
+        # Chat widget (reused from existing project)
+        self._chat_widget = ChatWidget()
+        layout.addWidget(self._chat_widget, 1)
 
-        # Stream toggle + input
-        self.stream_check = QCheckBox("Stream")
-        self.stream_check.setChecked(True)
-        self.stream_check.setStyleSheet("font-size:11px; color:#666;")
-
-        self.input_field = QLineEdit()
-        self.input_field.setPlaceholderText("Type a message...")
-        self.input_field.returnPressed.connect(self._send_message)
-
-        self.send_btn = QPushButton("\u27a4")
-        self.send_btn.setFixedSize(36, 36)
-        self.send_btn.setCursor(Qt.PointingHandCursor)
-        self.send_btn.setStyleSheet(
-            "QPushButton { border:none; border-radius:18px; "
-            "background:qlineargradient(x1:0,y1:0,x2:1,y2:1, "
-            "stop:0 #f093fb, stop:1 #f5576c); color:#fff; font-size:16px; }"
-            "QPushButton:hover { opacity:0.9; }"
-        )
-        self.send_btn.clicked.connect(self._send_message)
-
-        inp_row = QHBoxLayout()
-        inp_row.addWidget(self.stream_check)
-        inp_row.addWidget(self.input_field, 1)
-        inp_row.addWidget(self.send_btn)
-        layout.addLayout(inp_row)
+        # Connect ChatWidget's send signal to our handler
+        self._chat_widget.message_sent.connect(self._on_user_message)
 
         # ── WebSocket ───────────────────────────────────────
         self._ws = QWebSocket()
         self._ws.textMessageReceived.connect(self._on_ws_message)
-        self._ws.connected.connect(lambda: self._add_sys("Connected."))
-        self._ws.disconnected.connect(lambda: self._add_sys("Disconnected."))
+        self._ws.connected.connect(self._on_ws_connected)
+        self._ws.disconnected.connect(self._on_ws_disconnected)
+
+        self._connect_timer = QTimer(self)
+        self._connect_timer.setSingleShot(True)
+        self._connect_timer.timeout.connect(self._retry_ws)
+
+        self._chat_widget.add_system_message("Connecting to backend...")
         self._ws.open(QUrl(WS_URL))
 
-        self._streaming = False
-
-    # -- WS connection handlers ------------------------------------
+    # -- WebSocket signals -----------------------------------------
 
     def _on_ws_connected(self):
-        self._add_sys('Connected to AI Assistant backend.')
+        self._chat_widget.add_system_message("Connected.")
 
     def _on_ws_disconnected(self):
-        self._add_sys('Backend disconnected. Retrying in 3s...')
+        self._chat_widget.add_system_message("Disconnected. Retrying...")
         self._connect_timer.start(3000)
 
-    def _on_ws_error(self, error_code):
-        self._add_sys('Cannot reach backend. Retrying in 5s...')
-        self._add_sys('Start backend with:  uvicorn backend.main:app')
-        self._connect_timer.start(5000)
-
     def _retry_ws(self):
-        self._add_sys('Reconnecting...')
         self._ws.open(QUrl(WS_URL))
 
     # -- Send -------------------------------------------------------
 
-    def _send_message(self):
-        text = self.input_field.text().strip()
-        if not text or self._ws.state() != QAbstractSocket.ConnectedState:
+    def _on_user_message(self, text: str):
+        if self._ws.state() != QAbstractSocket.ConnectedState:
+            self._chat_widget.add_system_message(
+                "Backend offline. Start:  uvicorn backend.main:app"
+            )
             return
-        self.input_field.clear()
-        self._add_user(text)
+        stream = self._chat_widget.stream_check.isChecked()
+        self._ws.sendTextMessage(
+            __import__("json").dumps({"content": text, "stream": stream})
+        )
 
-        stream = self.stream_check.isChecked()
-        self._ws.sendTextMessage(json.dumps({"content": text, "stream": stream}))
-
-    # -- Receive ----------------------------------------------------
+    # -- WebSocket receive ------------------------------------------
 
     def _on_ws_message(self, raw: str):
         try:
-            data = json.loads(raw)
+            data = __import__("json").loads(raw)
         except Exception:
             return
 
         t = data.get("type")
+        c = data.get("content", "")
+        stream_on = self._chat_widget.stream_check.isChecked()
 
-        if t == "token" or (t == "delta" and self.stream_check.isChecked()):
-            self._append_stream(data.get("content", ""))
-
-        elif t == "done":
-            self._finalize(data.get("content", ""))
-
-        elif t == "reply":
-            self._finalize(data.get("content", ""))
-
+        if t == "token" or (t == "delta" and stream_on):
+            self._chat_widget.append_stream(c)
+        elif t in ("done", "reply"):
+            self._chat_widget.finalize_message(c)
         elif t == "thinking":
-            self._add_sys("\u23f3 " + data.get("content", ""))
-
+            self._chat_widget.show_thinking(c)
         elif t == "tool_call":
-            self._add_sys("\U0001f527 Calling " + data.get("tool", "?"))
-
-        elif t == "tool_result":
-            result = (data.get("result", "") or "")[:120]
-            self._add_sys("\u2705 " + result)
-
-        elif t == "error":
-            self._add_sys("\u274c " + data.get("content", ""))
-
-    # -- Display helpers -------------------------------------------
-
-    def _add_user(self, text: str):
-        self.browser.append(
-            '<p style="color:#666;"><b>You:</b> {}</p>'.format(text)
-        )
-
-    def _add_sys(self, text: str):
-        self.browser.append(
-            '<p style="color:#999;"><i>{}</i></p>'.format(text)
-        )
-
-    def _append_stream(self, text: str):
-        if not self._streaming:
-            self.browser.append("<p><b>Assistant:</b> ")
-            self._streaming = True
-        cursor = self.browser.textCursor()
-        cursor.movePosition(cursor.End)
-        cursor.insertText(text)
-
-    def _finalize(self, text: str):
-        if self._streaming:
-            cursor = self.browser.textCursor()
-            cursor.movePosition(cursor.End)
-            cursor.insertText("</p>")
-            self._streaming = False
-        else:
-            self.browser.append(
-                "<p><b>Assistant:</b> {}</p>".format(text)
+            self._chat_widget.add_system_message(
+                "[Tool] Calling " + data.get("tool", "?")
             )
+        elif t == "tool_result":
+            self._chat_widget.add_system_message(
+                "[Tool] " + (c[:120] if c else "")
+            )
+        elif t == "error":
+            self._chat_widget.add_system_message("[Error] " + c)
+        elif t == "reply":
+            self._chat_widget.finalize_message(c)
 
 
 # ====================================================================
@@ -285,8 +223,8 @@ class PetWindow(QMainWindow):
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
-        self._chat: ChatDialog | None = None
-        self._phase: str | None = None
+        self._chat = None
+        self._phase = None
         self._apply_phase()
 
         self._timer = QTimer(self)
@@ -361,11 +299,12 @@ class PetWindow(QMainWindow):
     def _toggle_chat(self):
         if self._chat is not None and self._chat.isVisible():
             self._chat.close()
+            self._chat.deleteLater()
             self._chat = None
         else:
-            self._chat = ChatDialog(self.geometry().topLeft(), self)
+            self._chat = ChatDialog(self.geometry().topLeft())
+            self._chat.destroyed.connect(self._on_chat_destroyed)
             self._chat.show()
-            self._chat.destroyed.connect(lambda: setattr(self, "_chat", None))
 
     def _on_chat_destroyed(self):
         self._chat = None
@@ -380,9 +319,11 @@ class PetWindow(QMainWindow):
         q = menu.addAction("\U0001f6aa  退出")
         action = menu.exec_(self.mapToGlobal(pos))
         if action == d:
-            self._phase = "day"; self._apply_phase()
+            self._phase = "day"
+            self._apply_phase()
         elif action == n:
-            self._phase = "night"; self._apply_phase()
+            self._phase = "night"
+            self._apply_phase()
         elif action == q:
             QApplication.quit()
 
@@ -393,11 +334,13 @@ class PetWindow(QMainWindow):
 
 def main():
     import sys
+
     app = QApplication(sys.argv)
     app.setApplicationName("Desktop Pet")
     win = PetWindow()
     win.show()
     sys.exit(app.exec_())
+
 
 if __name__ == "__main__":
     main()
