@@ -22,6 +22,7 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtGui import QColor, QPainter, QPixmap
 from PyQt5.QtWebSockets import QWebSocket
+from PyQt5.QtNetwork import QAbstractSocket
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -190,7 +191,7 @@ class ChatDialog(QDialog):
 
     def _send_message(self):
         text = self.input_field.text().strip()
-        if not text or self._ws.state() != QWebSocket.ConnectedState:
+        if not text or self._ws.state() != QAbstractSocket.ConnectedState:
             return
         self.input_field.clear()
         self._add_user(text)
