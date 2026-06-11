@@ -28,6 +28,7 @@ from PyQt5.QtGui import QColor, QPainter, QPixmap
 from PyQt5.QtNetwork import QAbstractSocket
 from PyQt5.QtWebSockets import QWebSocket
 from PyQt5.QtWidgets import (
+    QWidget,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
@@ -141,7 +142,7 @@ class ChatDialog(QDialog):
         # Chat list (bubbles)
         self._chat_list = QListWidget()
         self._chat_list.setStyleSheet(
-            "QListWidget { background: transparent; border: none; }"
+            "QListWidget { background: #ffffff; border: none; border-radius: 0px; }"
             "QListWidget::item { border: none; padding: 2px 4px; }"
         )
         self._chat_list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
@@ -264,6 +265,11 @@ class ChatDialog(QDialog):
         self._chat_list.scrollToBottom()
 
     def _finalize(self, text):
+        if self._streaming_label is not None:
+            pass  # streaming: label already has accumulated text
+        elif text:
+            # Non-streaming (reply) or no tokens: create full-text bubble
+            self.add_message_bubble(text, "ai")
         self._streaming_label = None
 
     def _on_ws_connected(self):
