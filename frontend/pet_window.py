@@ -28,6 +28,8 @@ from PyQt5.QtGui import QColor, QPainter, QPixmap
 from PyQt5.QtNetwork import QAbstractSocket
 from PyQt5.QtWebSockets import QWebSocket
 from PyQt5.QtWidgets import (
+    QListWidget,
+    QListWidgetItem,
     QCheckBox,
     QApplication,
     QDialog,
@@ -39,7 +41,6 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
-from frontend.widgets.chat_widget import ChatWidget
 
 IMG_DIR = Path(__file__).resolve().parent.parent / "images"
 SIZE = QSize(120, 120)
@@ -90,127 +91,239 @@ CHAT_H = 460
 
 
 class ChatDialog(QDialog):
-    """Frameless chat popup using existing ChatWidget + QWebSocket."""
+    """Frameless chat popup with bubble messages, styled input, status indicator."""
+
+    CHAT_W = 340
+    CHAT_H = 480
 
     def __init__(self, pet_pos: QPoint):
-        super().__init__()  # IMPORTANT: no parent — avoid auto-close on parent click
+        super().__init__()
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(CHAT_W, CHAT_H)
+        self.setFixedSize(self.CHAT_W, self.CHAT_H)
         self.setStyleSheet(
             "QDialog { background: rgba(255,255,255,0.95); border-radius: 16px; }"
         )
-
-        # Position to the left of the pet
-        x = max(0, pet_pos.x() - CHAT_W + 20)
-        y = max(0, pet_pos.y() - CHAT_H + 60)
+        x = max(0, pet_pos.x() - self.CHAT_W + 20)
+        y = max(0, pet_pos.y() - self.CHAT_H + 60)
         self.move(x, y)
 
-        # ── Layout ──────────────────────────────────────────
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # Header
         hdr = QHBoxLayout()
         hdr.setContentsMargins(12, 10, 12, 4)
         title = QLabel("AI \u5c0f\u52a9\u624b")
         title.setStyleSheet("font-weight:600; color:#1a1a2e; font-size:13px;")
+        self._status_dot = QLabel()
+        self._status_dot.setFixedSize(10, 10)
+        self._status_dot.setStyleSheet("background: #999; border-radius:5px;")
+        self._pulse_on = False
+        self._stream_cb = QCheckBox("Stream")
+        self._stream_cb.setChecked(True)
+        self._stream_cb.setStyleSheet("font-size:11px; color:#666;")
         self._close_btn = QPushButton("\u2715")
         self._close_btn.setFixedSize(26, 26)
         self._close_btn.setCursor(Qt.PointingHandCursor)
         self._close_btn.setStyleSheet(
-            "QPushButton { border:none; border-radius:13px; "
-            "background:rgba(0,0,0,0.1); font-size:13px; }"
+            "QPushButton { border:none; border-radius:13px;"
+            " background:rgba(0,0,0,0.1); font-size:13px; }"
             "QPushButton:hover { background:rgba(0,0,0,0.2); }"
         )
         self._close_btn.clicked.connect(self.close)
-        self._stream_cb = QCheckBox("Stream")
-        self._stream_cb.setChecked(True)
-        self._stream_cb.setStyleSheet("font-size:11px; color:#666;")
         hdr.addWidget(title, 1)
+        hdr.addWidget(self._status_dot)
+        hdr.addSpacing(4)
         hdr.addWidget(self._stream_cb)
+        hdr.addSpacing(4)
         hdr.addWidget(self._close_btn)
+
+        # Chat list (bubbles)
+        self._chat_list = QListWidget()
+        self._chat_list.setStyleSheet(
+            "QListWidget { background: transparent; border: none; }"
+            "QListWidget::item { border: none; padding: 2px 4px; }"
+        )
+        self._chat_list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        self._streaming_label = None
+
+        # Input row
+        self._input_field = QLineEdit()
+        self._input_field.setPlaceholderText("Type a message...")
+        self._input_field.setStyleSheet(
+            "QLineEdit { border:2px solid #ddd; border-radius:15px;"
+            " padding:8px 14px; background:rgba(0,0,0,0.7);"
+            " color:white; font-size:13px; }"
+            "QLineEdit:focus { border-color:#4CAF50; }"
+        )
+        self._input_field.returnPressed.connect(self._on_send)
+        self._send_btn = QPushButton("\u27a4")
+        self._send_btn.setFixedSize(38, 38)
+        self._send_btn.setCursor(Qt.PointingHandCursor)
+        self._send_btn.setStyleSheet(
+            "QPushButton { border:none; border-radius:19px;"
+            " background:#4CAF50; color:white; font-size:18px; }"
+            "QPushButton:hover { background:#388E3C; }"
+            "QPushButton:pressed { background:#2E7D32; }"
+        )
+        self._send_btn.clicked.connect(self._on_send)
+
+        inp = QHBoxLayout()
+        inp.setContentsMargins(8, 4, 8, 8)
+        inp.addWidget(self._input_field, 1)
+        inp.addWidget(self._send_btn)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         layout.addLayout(hdr)
+        layout.addWidget(self._chat_list, 1)
+        layout.addLayout(inp)
 
-        # Chat widget (reused from existing project)
-        self._chat_widget = ChatWidget()
-        layout.addWidget(self._chat_widget, 1)
+        # Pulse timer
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.timeout.connect(self._pulse_tick)
+        self._pulse_timer.start(600)
 
-        # Connect ChatWidget's send signal to our handler
-        self._chat_widget.message_sent.connect(self._on_user_message)
-
-        # ── WebSocket ───────────────────────────────────────
+        # WebSocket
         self._ws = QWebSocket()
         self._ws.textMessageReceived.connect(self._on_ws_message)
         self._ws.connected.connect(self._on_ws_connected)
         self._ws.disconnected.connect(self._on_ws_disconnected)
-
         self._connect_timer = QTimer(self)
         self._connect_timer.setSingleShot(True)
         self._connect_timer.timeout.connect(self._retry_ws)
-
-        self._chat_widget.add_system_message("Connecting to backend...")
+        self._add_sys("Connecting to backend...")
         self._ws.open(QUrl(WS_URL))
 
-    # -- WebSocket signals -----------------------------------------
+    def add_message_bubble(self, text, role="user"):
+        """Add a rounded bubble to the chat list.
+
+        role="user"   -> green, right, avatar
+        role="ai"     -> gray,  left,  avatar
+        role="system" -> center, italic
+        """
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(6, 3, 6, 3)
+        lay.setSpacing(6)
+
+        avatar = QLabel("\U0001f464" if role == "user" else "\U0001f916")
+        avatar.setFixedSize(24, 24)
+        avatar.setStyleSheet("font-size:16px;")
+
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setMaximumWidth(240)
+
+        if role == "user":
+            label.setStyleSheet(
+                "background:#4CAF50; color:white; border-radius:10px;"
+                " padding:8px 12px; font-size:13px;"
+            )
+            lay.addStretch()
+            lay.addWidget(label)
+            lay.addWidget(avatar)
+        elif role == "ai":
+            label.setStyleSheet(
+                "background:#E8E8E8; color:#333; border-radius:10px;"
+                " padding:8px 12px; font-size:13px;"
+            )
+            lay.addWidget(avatar)
+            lay.addWidget(label)
+            lay.addStretch()
+        else:
+            label.setStyleSheet(
+                "color:#999; font-style:italic; font-size:11px;"
+            )
+            lay.addStretch()
+            lay.addWidget(label)
+            lay.addStretch()
+
+        item = QListWidgetItem()
+        self._chat_list.addItem(item)
+        self._chat_list.setItemWidget(item, row)
+        item.setSizeHint(row.sizeHint())
+        self._chat_list.scrollToBottom()
+        return label
+
+    def _add_sys(self, text):
+        self.add_message_bubble(text, "system")
+
+    def _append_stream(self, text, role="ai"):
+        if self._streaming_label is None:
+            self._streaming_label = self.add_message_bubble("", role)
+        old = self._streaming_label.text()
+        self._streaming_label.setText(old + text)
+        idx = self._chat_list.count() - 1
+        if idx >= 0:
+            it = self._chat_list.item(idx)
+            w = self._chat_list.itemWidget(it)
+            if w:
+                it.setSizeHint(w.sizeHint())
+        self._chat_list.scrollToBottom()
+
+    def _finalize(self, text):
+        self._streaming_label = None
 
     def _on_ws_connected(self):
-        self._chat_widget.add_system_message("Connected.")
+        self._add_sys("Connected.")
 
     def _on_ws_disconnected(self):
-        self._chat_widget.add_system_message("Disconnected. Retrying...")
+        self._add_sys("Disconnected. Retrying...")
         self._connect_timer.start(3000)
 
     def _retry_ws(self):
         self._ws.open(QUrl(WS_URL))
 
-    # -- Send -------------------------------------------------------
-
-    def _on_user_message(self, text: str):
-        if self._ws.state() != QAbstractSocket.ConnectedState:
-            self._chat_widget.add_system_message(
-                "Backend offline. Start:  uvicorn backend.main:app"
+    def _pulse_tick(self):
+        if self._ws.state() == QAbstractSocket.ConnectedState:
+            self._pulse_on = not self._pulse_on
+            c = "#4CAF50" if self._pulse_on else "#66BB6A"
+            self._status_dot.setStyleSheet(
+                "background:{}; border-radius:5px;".format(c)
             )
+        else:
+            self._status_dot.setStyleSheet(
+                "background:#999; border-radius:5px;"
+            )
+
+    def _on_user_message(self, text):
+        if self._ws.state() != QAbstractSocket.ConnectedState:
+            self._add_sys("Backend offline. Start: uvicorn backend.main:app")
             return
-        stream = self._stream_cb.isChecked()
         self._ws.sendTextMessage(
-            __import__("json").dumps({"content": text, "stream": stream})
+            __import__("json").dumps({
+                "content": text, "stream": self._stream_cb.isChecked()
+            })
         )
 
-    # -- WebSocket receive ------------------------------------------
+    def _on_send(self):
+        text = self._input_field.text().strip()
+        if not text:
+            return
+        self._input_field.clear()
+        self.add_message_bubble(text, "user")
+        self._on_user_message(text)
 
-    def _on_ws_message(self, raw: str):
+    def _on_ws_message(self, raw):
         try:
             data = __import__("json").loads(raw)
         except Exception:
             return
-
         t = data.get("type")
         c = data.get("content", "")
         if t in ("token", "delta"):
-            self._chat_widget.append_stream(c)
+            self._append_stream(c)
         elif t in ("done", "reply"):
-            self._chat_widget.finalize_message(c)
+            self._finalize(c)
         elif t == "thinking":
-            self._chat_widget.show_thinking(c)
+            self._add_sys(c)
         elif t == "tool_call":
-            self._chat_widget.add_system_message(
-                "[Tool] Calling " + data.get("tool", "?")
-            )
+            self._add_sys("[Tool] Calling " + data.get("tool", "?") + "...")
         elif t == "tool_result":
-            self._chat_widget.add_system_message(
-                "[Tool] " + (c[:120] if c else "")
-            )
+            self._add_sys("[Tool] " + (c[:120] if c else ""))
         elif t == "error":
-            self._chat_widget.add_system_message("[Error] " + c)
-
-
-# ====================================================================
-# Pet window
-# ====================================================================
+            self._add_sys("[Error] " + c)
 
 class PetWindow(QMainWindow):
     """Frameless transparent pet with day/night images, jelly click, and chat."""
