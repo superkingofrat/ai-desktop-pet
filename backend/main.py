@@ -13,6 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
+from backend.core.config import settings
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
