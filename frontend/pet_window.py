@@ -106,7 +106,7 @@ class ChatDialog(QDialog):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedSize(self.CHAT_W, self.CHAT_H)
         self.setStyleSheet(
-            "QDialog { background: rgba(255,255,255,0.95); border-radius: 16px; }"
+            "QDialog { background: #ffffff; border-radius: 16px; }"
         )
         x = max(0, pet_pos.x() - self.CHAT_W + 20)
         y = max(0, pet_pos.y() - self.CHAT_H + 60)
