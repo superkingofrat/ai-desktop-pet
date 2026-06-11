@@ -21,7 +21,7 @@ from PyQt5.QtCore import (
     pyqtSignal,
 )
 from PyQt5.QtGui import QColor, QPainter, QPixmap
-from PyQt5.QtNetwork import QWebSocket
+from PyQt5.QtWebSockets import QWebSocket
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -177,9 +177,9 @@ class ChatDialog(QDialog):
         self._add_sys('Backend disconnected. Retrying in 3s...')
         self._connect_timer.start(3000)
 
-    def _on_ws_error(self, err):
-        msg = err.errorString() if hasattr(err, 'errorString') else str(err)
-        self._add_sys('Cannot reach backend. Start with:  uvicorn backend.main:app')
+    def _on_ws_error(self, error_code):
+        self._add_sys('Cannot reach backend. Retrying in 5s...')
+        self._add_sys('Start backend with:  uvicorn backend.main:app')
         self._connect_timer.start(5000)
 
     def _retry_ws(self):
