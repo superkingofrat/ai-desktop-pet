@@ -12,8 +12,9 @@ logger = logging.getLogger("assistant.db")
 class Database:
     """Manages the SQLite database connection and schema creation."""
 
-    def __init__(self, db_path: str | Path = "data/assistant.db"):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str | Path | None = None):
+        from backend.core.config import settings
+        self.db_path = Path(db_path) if db_path else settings.db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_tables()
 

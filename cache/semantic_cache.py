@@ -64,8 +64,9 @@ class SemanticCache:
     CREATE INDEX IF NOT EXISTS idx_cache_created ON semantic_cache(created_at DESC);
     """
 
-    def __init__(self, db_path: str | Path = "data/cache.db", threshold: float = 0.95):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str | Path | None = None, threshold: float = 0.95):
+        from backend.core.config import settings
+        self.db_path = Path(db_path) if db_path else settings.cache_db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.threshold = threshold
         self._embedder = None
