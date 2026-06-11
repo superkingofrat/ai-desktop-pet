@@ -38,7 +38,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         # Connect to backend
-        self.ws.open(QUrl("ws://127.0.0.1:8000/ws/chat"))
+        from frontend.config import get_chat_ws_url
+        self.ws.open(QUrl(get_chat_ws_url()))
 
     def _on_connected(self):
         self.chat_widget.add_system_message("Connected to server.")

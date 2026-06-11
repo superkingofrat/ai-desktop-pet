@@ -43,9 +43,9 @@ async def lifespan(app: FastAPI):
     from db.models import ConversationManager
     from cache.semantic_cache import SemanticCache
 
-    _db = Database()
+    _db = Database(db_path=settings.db_path)
     _cm = ConversationManager(_db)
-    _cache = SemanticCache()
+    _cache = SemanticCache(db_path=settings.cache_db_path)
 
     _bus = MessageBus()
     _provider = DeepSeekProvider()
@@ -225,4 +225,4 @@ async def ws_chat(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("backend.main:app", host=settings.host, port=settings.port, reload=False)

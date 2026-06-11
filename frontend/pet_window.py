@@ -43,7 +43,7 @@ from frontend.widgets.chat_widget import ChatWidget
 
 IMG_DIR = Path(__file__).resolve().parent.parent / "images"
 SIZE = QSize(120, 120)
-WS_URL = "ws://127.0.0.1:8000/ws/chat?session_id=pet-desktop"
+WS_URL = __import__("frontend.config", fromlist=["get_ws_url"]).get_ws_url()
 
 
 # ====================================================================
