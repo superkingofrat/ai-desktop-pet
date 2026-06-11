@@ -206,8 +206,6 @@ class ChatDialog(QDialog):
             )
         elif t == "error":
             self._chat_widget.add_system_message("[Error] " + c)
-        elif t == "reply":
-            self._chat_widget.finalize_message(c)
 
 
 # ====================================================================
