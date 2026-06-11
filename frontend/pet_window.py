@@ -28,6 +28,7 @@ from PyQt5.QtGui import QColor, QPainter, QPixmap
 from PyQt5.QtNetwork import QAbstractSocket
 from PyQt5.QtWebSockets import QWebSocket
 from PyQt5.QtWidgets import (
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QCheckBox,
