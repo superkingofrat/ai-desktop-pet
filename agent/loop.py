@@ -41,7 +41,14 @@ class AgentLoop:
         self.provider = provider
         self.model = model or provider.get_default_model()
         self.tools = ToolRegistry()
+        self._cached_tool_defs = None
         self._cache = None  # lazy-attached via process_message_stream
+
+    def _get_tool_definitions(self):
+        """Return cached tool definitions; rebuild on first call."""
+        if self._cached_tool_defs is None:
+            self._cached_tool_defs = self.tools.get_definitions()
+        return self._cached_tool_defs
 
     async def process_message_stream(
         self,
@@ -72,7 +79,7 @@ class AgentLoop:
         semantic_cache : SemanticCache | None
             Cache for semantically similar queries (embedding-based).
         """
-        tool_defs = self.tools.get_definitions()
+        tool_defs = self._get_tool_definitions()
 
         # ── Build messages list ──────────────────────────────────
         system_prompt_text = personality or self.SYSTEM_PROMPT
