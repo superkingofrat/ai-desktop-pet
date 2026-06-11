@@ -1,4 +1,4 @@
-﻿"""DeepSeek LLM provider with streaming support."""
+"""DeepSeek LLM provider with streaming support."""
 
 from __future__ import annotations
 

@@ -1,1 +1,1 @@
-﻿"""Configuration loading and management."""
+"""Configuration loading and management."""

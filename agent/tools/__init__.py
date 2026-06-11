@@ -1,4 +1,4 @@
-﻿"""Agent tool system — base class, registry, and built-in tools.
+"""Agent tool system — base class, registry, and built-in tools.
 
 Usage
 -----

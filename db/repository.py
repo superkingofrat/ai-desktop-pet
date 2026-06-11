@@ -1,4 +1,4 @@
-﻿"""Repository pattern — data access layer."""
+"""Repository pattern — data access layer."""
 from __future__ import annotations
 
 import json

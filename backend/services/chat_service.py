@@ -1,4 +1,4 @@
-﻿"""Chat orchestration service — wires user input through agent."""
+"""Chat orchestration service — wires user input through agent."""
 from __future__ import annotations
 
 import logging

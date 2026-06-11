@@ -1,1 +1,1 @@
-﻿"""Core configuration and dependency injection utilities."""
+"""Core configuration and dependency injection utilities."""

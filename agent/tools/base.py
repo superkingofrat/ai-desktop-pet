@@ -1,4 +1,4 @@
-﻿"""Base class for agent tools — with auto-registration via __init_subclass__."""
+"""Base class for agent tools — with auto-registration via __init_subclass__."""
 
 from __future__ import annotations
 

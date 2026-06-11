@@ -1,4 +1,4 @@
-﻿"""Semantic cache — embed queries and cache LLM responses with similarity matching."""
+"""Semantic cache — embed queries and cache LLM responses with similarity matching."""
 
 from __future__ import annotations
 
@@ -19,12 +19,19 @@ def _get_embedder():
     if _EMBEDDING_MODEL is not None:
         return _EMBEDDING_MODEL
     try:
+        old_to = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(5)
         from fastembed import TextEmbedding
         _EMBEDDING_MODEL = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
+        socket.setdefaulttimeout(old_to)
         logger.info("Embedding model loaded: sentence-transformers/all-MiniLM-L6-v2")
     except Exception as e:
         logger.warning("Embedding unavailable (%s); using fuzzy + exact fallback", e)
         _EMBEDDING_MODEL = None
+        try:
+            socket.setdefaulttimeout(None)
+        except Exception:
+            pass
     return _EMBEDDING_MODEL
 
 

@@ -1,4 +1,4 @@
-﻿"""SQLite database — connection, table creation, and session management."""
+"""SQLite database — connection, table creation, and session management."""
 
 from __future__ import annotations
 

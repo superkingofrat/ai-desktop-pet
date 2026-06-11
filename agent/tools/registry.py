@@ -1,4 +1,4 @@
-﻿"""Tool registry — dynamic tool management with auto-discovery."""
+"""Tool registry — dynamic tool management with auto-discovery."""
 
 from __future__ import annotations
 

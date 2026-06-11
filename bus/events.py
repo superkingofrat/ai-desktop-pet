@@ -1,4 +1,4 @@
-﻿"""Event types for the message bus."""
+"""Event types for the message bus."""
 
 from __future__ import annotations
 

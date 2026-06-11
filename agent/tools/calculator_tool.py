@@ -1,4 +1,4 @@
-﻿"""Calculator tool — safely evaluate math expressions."""
+"""Calculator tool — safely evaluate math expressions."""
 
 from __future__ import annotations
 

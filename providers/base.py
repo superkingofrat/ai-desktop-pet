@@ -1,4 +1,4 @@
-﻿"""Provider abstract base — interface for all LLM providers."""
+"""Provider abstract base — interface for all LLM providers."""
 
 from __future__ import annotations
 

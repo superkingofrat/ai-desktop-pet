@@ -1,4 +1,4 @@
-﻿"""Todo tool — saves todos to a local JSON file."""
+"""Todo tool — saves todos to a local JSON file."""
 
 from __future__ import annotations
 

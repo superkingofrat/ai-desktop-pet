@@ -1,1 +1,1 @@
-﻿"""Database layer — models, repository, and connection management."""
+"""Database layer — models, repository, and connection management."""

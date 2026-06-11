@@ -1,4 +1,4 @@
-﻿"""Agent Loop — core processing engine with conversation persistence and semantic cache."""
+"""Agent Loop — core processing engine with conversation persistence and semantic cache."""
 
 from __future__ import annotations
 

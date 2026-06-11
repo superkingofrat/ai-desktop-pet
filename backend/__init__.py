@@ -1,1 +1,1 @@
-﻿"""FastAPI backend application — API endpoints, WebSocket handler, and service layer."""
+"""FastAPI backend application — API endpoints, WebSocket handler, and service layer."""

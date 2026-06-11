@@ -1,4 +1,4 @@
-﻿"""Standalone utility helpers (not agent tools)."""
+"""Standalone utility helpers (not agent tools)."""
 from __future__ import annotations
 
 import json

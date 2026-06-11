@@ -28,6 +28,7 @@ from PyQt5.QtGui import QColor, QPainter, QPixmap
 from PyQt5.QtNetwork import QAbstractSocket
 from PyQt5.QtWebSockets import QWebSocket
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QApplication,
     QDialog,
     QHBoxLayout,
@@ -170,7 +171,7 @@ class ChatDialog(QDialog):
                 "Backend offline. Start:  uvicorn backend.main:app"
             )
             return
-        stream = self._chat_widget.stream_check.isChecked()
+        stream = self._stream_cb.isChecked()
         self._ws.sendTextMessage(
             __import__("json").dumps({"content": text, "stream": stream})
         )
@@ -185,9 +186,7 @@ class ChatDialog(QDialog):
 
         t = data.get("type")
         c = data.get("content", "")
-        stream_on = self._chat_widget.stream_check.isChecked()
-
-        if t == "token" or (t == "delta" and stream_on):
+        if t in ("token", "delta"):
             self._chat_widget.append_stream(c)
         elif t in ("done", "reply"):
             self._chat_widget.finalize_message(c)

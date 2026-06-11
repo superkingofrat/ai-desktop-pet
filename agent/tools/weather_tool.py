@@ -1,4 +1,4 @@
-﻿"""Weather tool — simulated weather lookup by city name."""
+"""Weather tool — simulated weather lookup by city name."""
 
 from __future__ import annotations
 

@@ -1,1 +1,1 @@
-﻿"""Semantic cache — embed-based LLM response caching."""
+"""Semantic cache — embed-based LLM response caching."""

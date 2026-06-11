@@ -1,4 +1,4 @@
-﻿"""PyQt5 desktop application entry point."""
+"""PyQt5 desktop application entry point."""
 from __future__ import annotations
 
 import sys

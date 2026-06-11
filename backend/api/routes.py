@@ -1,4 +1,4 @@
-﻿"""REST API routes — health check, session management, etc."""
+"""REST API routes — health check, session management, etc."""
 from __future__ import annotations
 
 import logging

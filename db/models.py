@@ -1,4 +1,4 @@
-﻿"""SQLite-backed conversation manager — storage for sessions, messages, and user profiles.
+"""SQLite-backed conversation manager — storage for sessions, messages, and user profiles.
 
 Tables
 ------

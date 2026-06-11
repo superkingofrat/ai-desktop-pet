@@ -1,4 +1,4 @@
-﻿"""AI Assistant Backend — FastAPI + WebSocket with streaming toggle + semantic cache."""
+"""AI Assistant Backend — FastAPI + WebSocket with streaming toggle + semantic cache."""
 
 from __future__ import annotations
 
@@ -111,7 +111,7 @@ async def ws_chat(
             if data.get("session_id"):
                 session_id = data["session_id"]
 
-            stream = data.get("stream", False)
+            stream = data.get("stream", True)
             logger.info(
                 "[WS] Received  session=%s  stream=%s  content=%.60s",
                 session_id, stream, content,
