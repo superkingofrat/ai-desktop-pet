@@ -11,6 +11,8 @@ if _root not in sys.path:
     sys.path.insert(0, _root)
 
 from PyQt5.QtCore import (
+    QBuffer,
+    QByteArray,
     QSettings,
     QAbstractAnimation,
     QEasingCurve,
@@ -29,6 +31,8 @@ from PyQt5.QtGui import QColor, QPainter, QPixmap
 from PyQt5.QtNetwork import QAbstractSocket
 from PyQt5.QtWebSockets import QWebSocket
 from PyQt5.QtWidgets import (
+    QFileDialog,
+    QGroupBox,
     QPlainTextEdit,
     QFrame,
     QWidget,
@@ -97,13 +101,34 @@ CHAT_W = 340
 CHAT_H = 460
 
 
+
+
+# -- Pet icon helpers --------------------------------------------------
+def _icon_to_b64(pm):
+    """QPixmap -> base64 string for QSettings."""
+    import base64
+    data = QByteArray()
+    buf = QBuffer(data)
+    buf.open(2)  # QIODevice.WriteOnly
+    pm.save(buf, "PNG")
+    buf.close()
+    return base64.b64encode(bytes(data)).decode("ascii")
+
+
+def _b64_to_icon(b64_str):
+    """base64 string -> QPixmap."""
+    import base64
+    raw = QByteArray.fromBase64(b64_str.encode("ascii"))
+    pm = QPixmap()
+    pm.loadFromData(bytes(raw))
+    return pm
 class ChatDialog(QDialog):
     """Frameless chat popup with bubble messages, styled input, status indicator."""
 
     CHAT_W = 340
     CHAT_H = 480
 
-    def __init__(self, pet_pos: QPoint):
+    def __init__(self, pet_pos: QPoint, parent_win=None):
         super().__init__()
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -124,6 +149,8 @@ class ChatDialog(QDialog):
         self._status_dot.setFixedSize(10, 10)
         self._status_dot.setStyleSheet("background: #999; border-radius:5px;")
         self._pulse_on = False
+        self._parent_win = parent_win
+        self._personality = QSettings("MyApp", "AIDesktopPet").value("personality", "", str)
         self._stream_cb = QCheckBox("Stream")
         self._stream_cb.setChecked(True)
         self._stream_cb.setStyleSheet("font-size:11px; color:#666;")
@@ -316,12 +343,13 @@ class ChatDialog(QDialog):
         self._connect_timer.start(3000)
 
     def _open_settings(self):
-        """Open the settings dialog; reload personality on save."""
+        """Open the settings dialog; reload personality + icon on save."""
         dlg = SettingsDialog(self)
         if dlg.exec_() == QDialog.Accepted:
-            self._personality = QSettings(
-                "MyApp", "AIDesktopPet"
-            ).value("personality", "", str)
+            s = QSettings("MyApp", "AIDesktopPet")
+            self._personality = s.value("personality", "", str)
+            if self._parent_win is not None:
+                self._parent_win._reload_custom_icon()
 
     def _retry_ws(self):
         self._ws.open(QUrl(_ws_url()))
@@ -379,13 +407,14 @@ class ChatDialog(QDialog):
             self._add_sys("[Error] " + c)
 
 class SettingsDialog(QDialog):
-    """Settings panel — personality prompt editor."""
+    """Settings panel — personality prompt + pet icon editor."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("\u8bbe\u7f6e")
-        self.setFixedSize(400, 320)
+        self.setFixedSize(440, 480)
         self.setModal(True)
+        self._selected_icon = None  # QPixmap or None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -395,6 +424,7 @@ class SettingsDialog(QDialog):
         title.setStyleSheet("font-size:18px; font-weight:600; color:#1a1a2e;")
         layout.addWidget(title)
 
+        # ---- Personality ----
         lbl = QLabel("\u6027\u683c Prompt\uff1a")
         lbl.setStyleSheet("font-size:13px; font-weight:500; color:#333;")
         layout.addWidget(lbl)
@@ -412,9 +442,64 @@ class SettingsDialog(QDialog):
         hint.setStyleSheet("font-size:11px; color:#999;")
         layout.addWidget(hint)
 
+        # ---- Pet Icon ----
+        grp = QGroupBox("\u5ba0\u7269\u5f62\u8c61")
+        grp.setStyleSheet("font-size:13px; font-weight:500;")
+        grp_layout = QVBoxLayout(grp)
+        grp_layout.setSpacing(10)
+
+        icon_row = QHBoxLayout()
+        self._preview = QLabel()
+        self._preview.setFixedSize(60, 60)
+        self._preview.setStyleSheet(
+            "border:2px solid #ddd; border-radius:8px; background:#f9f9f9;"
+        )
+        self._preview.setAlignment(Qt.AlignCenter)
+        self._preview.setText("\U0001f431")
+        self._preview.setStyleSheet(
+            self._preview.styleSheet()
+            + " font-size:32px;"
+        )
+        icon_row.addWidget(self._preview)
+
+        btn_col = QVBoxLayout()
+        self._select_btn = QPushButton("\u9009\u62e9\u56fe\u7247")
+        self._select_btn.setCursor(Qt.PointingHandCursor)
+        self._select_btn.setStyleSheet(
+            "QPushButton { border:1px solid #4CAF50; border-radius:6px; "
+            "padding:6px 16px; background:white; color:#4CAF50; font-size:13px; }"
+            "QPushButton:hover { background:#E8F5E9; }"
+        )
+        self._select_btn.clicked.connect(self._on_select_icon)
+
+        self._reset_btn = QPushButton("\u91cd\u7f6e")
+        self._reset_btn.setCursor(Qt.PointingHandCursor)
+        self._reset_btn.setStyleSheet(
+            "QPushButton { border:1px solid #ccc; border-radius:6px; "
+            "padding:6px 16px; background:white; color:#666; font-size:13px; }"
+            "QPushButton:hover { background:#f5f5f5; }"
+        )
+        self._reset_btn.clicked.connect(self._on_reset_icon)
+
+        btn_col.addWidget(self._select_btn)
+        btn_col.addWidget(self._reset_btn)
+        btn_col.addStretch()
+        icon_row.addLayout(btn_col)
+        icon_row.addStretch()
+        grp_layout.addLayout(icon_row)
+
+        icon_hint = QLabel(
+            "\u56fe\u7247\u5c06\u4fdd\u5b58\u5230\u672c\u5730\u8bbe\u7f6e\uff0c"
+            "\u5ba0\u7269\u7a97\u548c\u804a\u5929\u7a97\u56fe\u6807\u90fd\u4f1a\u6539\u53d8"
+        )
+        icon_hint.setStyleSheet("font-size:11px; color:#999;")
+        icon_hint.setWordWrap(True)
+        grp_layout.addWidget(icon_hint)
+
+        layout.addWidget(grp)
         layout.addStretch(1)
 
-        # Buttons
+        # ---- Buttons ----
         self._save_btn = QPushButton("\u4fdd\u5b58")
         self._save_btn.setCursor(Qt.PointingHandCursor)
         self._save_btn.setStyleSheet(
@@ -440,18 +525,53 @@ class SettingsDialog(QDialog):
         btn_row.addWidget(self._cancel_btn)
         layout.addLayout(btn_row)
 
-        # Load existing personality
+        # Load existing values from QSettings
         s = QSettings("MyApp", "AIDesktopPet")
-        saved = s.value("personality", "", str)
-        if saved:
-            self._editor.setPlainText(saved)
+        saved_p = s.value("personality", "", str)
+        if saved_p:
+            self._editor.setPlainText(saved_p)
+        saved_icon = s.value("pet_icon_data", "", str)
+        if saved_icon:
+            pm = _b64_to_icon(saved_icon)
+            if pm and not pm.isNull():
+                self._selected_icon = pm
+                thumb = pm.scaled(56, 56, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self._preview.setPixmap(thumb)
+                self._preview.setText("")
+
+    def _on_select_icon(self):
+        """Open file dialog to choose a pet image."""
+        fpath, _ = QFileDialog.getOpenFileName(
+            self, "\u9009\u62e9\u5ba0\u7269\u56fe\u7247", "",
+            "\u56fe\u7247 (*.png *.jpg *.jpeg *.gif)"
+        )
+        if not fpath:
+            return
+        pm = QPixmap(fpath)
+        if pm.isNull():
+            return
+        self._selected_icon = pm
+        thumb = pm.scaled(56, 56, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self._preview.setPixmap(thumb)
+        self._preview.setText("")
+
+    def _on_reset_icon(self):
+        """Reset icon to default (emoji cat face)."""
+        self._selected_icon = None
+        self._preview.setText("\U0001f431")
+        self._preview.setPixmap(QPixmap())
 
     def _on_save(self):
-        """Save personality to QSettings and accept."""
+        """Save personality + pet icon to QSettings and accept."""
         s = QSettings("MyApp", "AIDesktopPet")
         s.setValue("personality", self._editor.toPlainText())
+        if self._selected_icon is not None:
+            s.setValue("pet_icon_data", _icon_to_b64(self._selected_icon))
+        else:
+            s.remove("pet_icon_data")
         s.sync()
         self.accept()
+
 
 
 class PetWindow(QMainWindow):
@@ -480,6 +600,8 @@ class PetWindow(QMainWindow):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._apply_phase)
         self._timer.start(60_000)
+        self._custom_icon_active = False
+        self._apply_custom_icon()
 
     # -- Day / night ------------------------------------------------
 
@@ -488,6 +610,8 @@ class PetWindow(QMainWindow):
         return "night" if hour >= 18 or hour < 6 else "day"
 
     def _apply_phase(self):
+        if self._custom_icon_active:
+            return
         new = self._compute_phase()
         if new == self._phase:
             return
@@ -495,6 +619,36 @@ class PetWindow(QMainWindow):
         pix = self._load_pixmap(new)
         scaled = pix.scaled(SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._label.setPixmap(scaled)
+
+    def _apply_custom_icon(self, pm=None):
+        """Set custom pet image; stop day/night timer."""
+        if pm is not None:
+            self._custom_icon_active = True
+            scaled = pm.scaled(SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self._label.setPixmap(scaled)
+            self._timer.stop()
+            return
+        # No custom icon passed: check QSettings
+        saved = QSettings("MyApp", "AIDesktopPet").value(
+            "pet_icon_data", "", str
+        )
+        if saved:
+            pm = _b64_to_icon(saved)
+            if pm and not pm.isNull():
+                self._custom_icon_active = True
+                scaled = pm.scaled(SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self._label.setPixmap(scaled)
+                self._timer.stop()
+                return
+        # No custom icon: ensure day/night is active
+        self._custom_icon_active = False
+        self._phase = None
+        self._timer.start()
+        self._apply_phase()
+
+    def _reload_custom_icon(self):
+        """Re-read QSettings and apply/remove custom icon."""
+        self._apply_custom_icon()
 
     def _load_pixmap(self, phase: str) -> QPixmap:
         path = IMG_DIR / f"{phase}.png"
