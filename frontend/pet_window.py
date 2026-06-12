@@ -47,7 +47,9 @@ from PyQt5.QtWidgets import (
 
 IMG_DIR = Path(__file__).resolve().parent.parent / "images"
 SIZE = QSize(120, 120)
-WS_URL = __import__("frontend.config", fromlist=["get_ws_url"]).get_ws_url()
+def _ws_url():
+    """Lazy WebSocket URL — reads config fresh each call (port may change)."""
+    return __import__("frontend.config", fromlist=["get_ws_url"]).get_ws_url()
 
 
 # ====================================================================
@@ -137,6 +139,16 @@ class ChatDialog(QDialog):
         hdr.addSpacing(4)
         hdr.addWidget(self._stream_cb)
         hdr.addSpacing(4)
+        self._settings_btn = QPushButton("\u2699")
+        self._settings_btn.setFixedSize(26, 26)
+        self._settings_btn.setCursor(Qt.PointingHandCursor)
+        self._settings_btn.setStyleSheet(
+            "QPushButton { border:none; border-radius:13px; "
+            "background:rgba(0,0,0,0.1); font-size:13px; }"
+            "QPushButton:hover { background:rgba(0,0,0,0.2); }"
+        )
+        self._settings_btn.clicked.connect(self._open_settings)
+        hdr.addWidget(self._settings_btn)
         hdr.addWidget(self._close_btn)
 
         # Chat list (bubbles)
@@ -207,7 +219,7 @@ class ChatDialog(QDialog):
         self._connect_timer.setSingleShot(True)
         self._connect_timer.timeout.connect(self._retry_ws)
         self._add_sys("Connecting to backend...")
-        self._ws.open(QUrl(WS_URL))
+        self._ws.open(QUrl(_ws_url()))
 
     def add_message_bubble(self, text, role="user"):
         """Add a rounded bubble to the chat list.
@@ -296,8 +308,13 @@ class ChatDialog(QDialog):
         self._add_sys("Disconnected. Retrying...")
         self._connect_timer.start(3000)
 
+    def _open_settings(self):
+        """Open the settings dialog."""
+        dlg = SettingsDialog(self)
+        dlg.exec_()
+
     def _retry_ws(self):
-        self._ws.open(QUrl(WS_URL))
+        self._ws.open(QUrl(_ws_url()))
 
     def _pulse_tick(self):
         if self._ws.state() == QAbstractSocket.ConnectedState:
@@ -348,6 +365,44 @@ class ChatDialog(QDialog):
             self._add_sys("[Tool] " + (c[:120] if c else ""))
         elif t == "error":
             self._add_sys("[Error] " + c)
+
+class SettingsDialog(QDialog):
+    """Settings panel for the pet window."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("\u8bbe\u7f6e")
+        self.setFixedSize(400, 300)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+
+        title = QLabel("\u8bbe\u7f6e\u9762\u677f")
+        title.setStyleSheet("font-size:18px; font-weight:600; color:#1a1a2e;")
+        layout.addWidget(title)
+
+        info = QLabel("\u8bbe\u7f6e\u9762\u677f\uff08\u540e\u7eed\u529f\u80fd\u5c06\u6dfb\u52a0\uff09")
+        info.setStyleSheet("font-size:13px; color:#666;")
+        info.setWordWrap(True)
+        layout.addWidget(info, 1)
+
+        close_btn = QPushButton("\u5173\u95ed")
+        close_btn.setFixedSize(100, 36)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setStyleSheet(
+            "QPushButton { border:none; border-radius:6px; "
+            "background:#4CAF50; color:white; font-size:14px; }"
+            "QPushButton:hover { background:#388E3C; }"
+        )
+        close_btn.clicked.connect(self.close)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
 
 class PetWindow(QMainWindow):
     """Frameless transparent pet with day/night images, jelly click, and chat."""
