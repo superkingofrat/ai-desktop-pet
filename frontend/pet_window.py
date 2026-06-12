@@ -595,12 +595,12 @@ class PetWindow(QMainWindow):
 
         self._chat = None
         self._phase = None
+        self._custom_icon_active = False
         self._apply_phase()
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._apply_phase)
         self._timer.start(60_000)
-        self._custom_icon_active = False
         self._apply_custom_icon()
 
     # -- Day / night ------------------------------------------------
