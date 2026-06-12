@@ -30,6 +30,11 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtGui import QColor, QPainter, QPixmap
 from PyQt5.QtNetwork import QAbstractSocket
+from frontend.pet_animator import (
+    PetState,
+    PetAnimator,
+    detect_animation_resources,
+)
 from PyQt5.QtWebSockets import QWebSocket
 from PyQt5.QtWidgets import (
     QFileDialog,
@@ -604,12 +609,34 @@ class PetWindow(QMainWindow):
         self._timer.timeout.connect(self._apply_phase)
         self._timer.start(60_000)
         self._apply_custom_icon()
+        self._setup_animator()
 
     # -- Day / night ------------------------------------------------
 
     def _compute_phase(self):
         hour = QTime.currentTime().hour()
         return "night" if hour >= 18 or hour < 6 else "day"
+
+    def _setup_animator(self):
+        """Detect resources and create pet animator."""
+        res = detect_animation_resources(IMG_DIR)
+        saved = QSettings("MyApp", "AIDesktopPet").value("pet_icon_data", "", str)
+        rt = "single_image" if saved else res["type"]
+        self.animator = PetAnimator(
+            label=self._label, window=self,
+            resource_type=rt, folder=res["config"]["folder"],
+        )
+
+    def _rebuild_animator(self):
+        """Hot-swap after user uploads/resets image."""
+        res = detect_animation_resources(IMG_DIR)
+        saved = QSettings("MyApp", "AIDesktopPet").value("pet_icon_data", "", str)
+        rt = "single_image" if saved else res["type"]
+        a = getattr(self, 'animator', None)
+        if a is not None:
+            a.hot_swap(rt, folder=res["config"]["folder"])
+        else:
+            self._setup_animator()
 
     def _apply_phase(self):
         if self._custom_icon_active:
@@ -649,8 +676,9 @@ class PetWindow(QMainWindow):
         self._apply_phase()
 
     def _reload_custom_icon(self):
-        """Re-read QSettings and apply/remove custom icon."""
+        """Re-read QSettings, apply icon, and rebuild animator."""
         self._apply_custom_icon()
+        self._rebuild_animator()
 
     def _load_pixmap(self, phase: str) -> QPixmap:
         path = IMG_DIR / f"{phase}.png"
@@ -676,7 +704,11 @@ class PetWindow(QMainWindow):
     # -- Click: jelly + toggle chat --------------------------------
 
     def _on_click(self):
-        self._jelly()
+        a = getattr(self, 'animator', None)
+        if a is not None:
+            a.transition_to(PetState.CLICKED)
+        else:
+            self._jelly()
         self._toggle_chat()
 
     def _jelly(self):
