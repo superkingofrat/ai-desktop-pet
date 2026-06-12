@@ -12,6 +12,7 @@ if _root not in sys.path:
 
 from PyQt5.QtCore import (
     QBuffer,
+    QIODevice,
     QByteArray,
     QSettings,
     QAbstractAnimation,
@@ -109,7 +110,7 @@ def _icon_to_b64(pm):
     import base64
     data = QByteArray()
     buf = QBuffer(data)
-    buf.open(2)  # QIODevice.WriteOnly
+    buf.open(QIODevice.WriteOnly)
     pm.save(buf, "PNG")
     buf.close()
     return base64.b64encode(bytes(data)).decode("ascii")
