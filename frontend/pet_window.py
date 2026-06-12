@@ -28,6 +28,7 @@ from PyQt5.QtGui import QColor, QPainter, QPixmap
 from PyQt5.QtNetwork import QAbstractSocket
 from PyQt5.QtWebSockets import QWebSocket
 from PyQt5.QtWidgets import (
+    QFrame,
     QWidget,
     QLineEdit,
     QListWidget,
@@ -104,10 +105,9 @@ class ChatDialog(QDialog):
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
+        # Background painted by QFrame container
         self.setFixedSize(self.CHAT_W, self.CHAT_H)
-        self.setStyleSheet(
-            "QDialog { background: #ffffff; border-radius: 16px; }"
-        )
+        # QFrame container has the white background + rounded corners
         x = max(0, pet_pos.x() - self.CHAT_W + 20)
         y = max(0, pet_pos.y() - self.CHAT_H + 60)
         self.move(x, y)
@@ -174,7 +174,18 @@ class ChatDialog(QDialog):
         inp.addWidget(self._input_field, 1)
         inp.addWidget(self._send_btn)
 
-        layout = QVBoxLayout(self)
+        self._container = QFrame(self)
+        self._container.setObjectName("chatBG")
+        self._container.setStyleSheet(
+            "#chatBG { background: #ffffff; border-radius: 16px; }"
+        )
+        self._container.setGeometry(0, 0, self.CHAT_W, self.CHAT_H)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(self._container)
+
+        layout = QVBoxLayout(self._container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addLayout(hdr)
@@ -191,6 +202,7 @@ class ChatDialog(QDialog):
         self._ws.textMessageReceived.connect(self._on_ws_message)
         self._ws.connected.connect(self._on_ws_connected)
         self._ws.disconnected.connect(self._on_ws_disconnected)
+        self._ws.error.connect(self._on_ws_error)
         self._connect_timer = QTimer(self)
         self._connect_timer.setSingleShot(True)
         self._connect_timer.timeout.connect(self._retry_ws)
@@ -272,6 +284,11 @@ class ChatDialog(QDialog):
             self.add_message_bubble(text, "ai")
         self._streaming_label = None
 
+    def _on_ws_error(self, error_code):
+        """Handle WebSocket connection failure and retry."""
+        self._add_sys("Connection failed. Retrying in 5s...")
+        self._connect_timer.start(5000)
+
     def _on_ws_connected(self):
         self._add_sys("Connected.")
 
@@ -341,6 +358,7 @@ class PetWindow(QMainWindow):
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
+        # Background painted by QFrame container
         self.setFixedSize(SIZE)
 
         self._label = _PetLabel(self)
