@@ -11,6 +11,7 @@ if _root not in sys.path:
     sys.path.insert(0, _root)
 
 from PyQt5.QtCore import (
+    QSettings,
     QAbstractAnimation,
     QEasingCurve,
     QPoint,
@@ -28,6 +29,7 @@ from PyQt5.QtGui import QColor, QPainter, QPixmap
 from PyQt5.QtNetwork import QAbstractSocket
 from PyQt5.QtWebSockets import QWebSocket
 from PyQt5.QtWidgets import (
+    QPlainTextEdit,
     QFrame,
     QWidget,
     QLineEdit,
@@ -206,6 +208,11 @@ class ChatDialog(QDialog):
 
         # Pulse timer
         self._pulse_timer = QTimer(self)
+        # Load personality from QSettings
+        self._personality = QSettings("MyApp", "AIDesktopPet").value(
+            "personality", "", str
+        )
+        self._pulse_timer = QTimer(self)
         self._pulse_timer.timeout.connect(self._pulse_tick)
         self._pulse_timer.start(600)
 
@@ -309,9 +316,12 @@ class ChatDialog(QDialog):
         self._connect_timer.start(3000)
 
     def _open_settings(self):
-        """Open the settings dialog."""
+        """Open the settings dialog; reload personality on save."""
         dlg = SettingsDialog(self)
-        dlg.exec_()
+        if dlg.exec_() == QDialog.Accepted:
+            self._personality = QSettings(
+                "MyApp", "AIDesktopPet"
+            ).value("personality", "", str)
 
     def _retry_ws(self):
         self._ws.open(QUrl(_ws_url()))
@@ -334,7 +344,9 @@ class ChatDialog(QDialog):
             return
         self._ws.sendTextMessage(
             __import__("json").dumps({
-                "content": text, "stream": self._stream_cb.isChecked()
+                "content": text,
+                "stream": self._stream_cb.isChecked(),
+                "personality": self._personality
             })
         )
 
@@ -367,41 +379,79 @@ class ChatDialog(QDialog):
             self._add_sys("[Error] " + c)
 
 class SettingsDialog(QDialog):
-    """Settings panel for the pet window."""
+    """Settings panel — personality prompt editor."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("\u8bbe\u7f6e")
-        self.setFixedSize(400, 300)
+        self.setFixedSize(400, 320)
         self.setModal(True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        layout.setSpacing(12)
 
-        title = QLabel("\u8bbe\u7f6e\u9762\u677f")
+        title = QLabel("\u8bbe\u7f6e")
         title.setStyleSheet("font-size:18px; font-weight:600; color:#1a1a2e;")
         layout.addWidget(title)
 
-        info = QLabel("\u8bbe\u7f6e\u9762\u677f\uff08\u540e\u7eed\u529f\u80fd\u5c06\u6dfb\u52a0\uff09")
-        info.setStyleSheet("font-size:13px; color:#666;")
-        info.setWordWrap(True)
-        layout.addWidget(info, 1)
+        lbl = QLabel("\u6027\u683c Prompt\uff1a")
+        lbl.setStyleSheet("font-size:13px; font-weight:500; color:#333;")
+        layout.addWidget(lbl)
 
-        close_btn = QPushButton("\u5173\u95ed")
-        close_btn.setFixedSize(100, 36)
-        close_btn.setCursor(Qt.PointingHandCursor)
-        close_btn.setStyleSheet(
-            "QPushButton { border:none; border-radius:6px; "
-            "background:#4CAF50; color:white; font-size:14px; }"
+        self._editor = QPlainTextEdit()
+        self._editor.setFixedHeight(80)
+        self._editor.setStyleSheet(
+            "QPlainTextEdit { border:1px solid #ddd; border-radius:8px; "
+            "padding:8px; font-size:13px; }"
+            "QPlainTextEdit:focus { border-color:#4CAF50; }"
+        )
+        layout.addWidget(self._editor)
+
+        hint = QLabel("\u7559\u7a7a\u5219\u4f7f\u7528\u9ed8\u8ba4\u52a9\u624b\u6027\u683c\u3002")
+        hint.setStyleSheet("font-size:11px; color:#999;")
+        layout.addWidget(hint)
+
+        layout.addStretch(1)
+
+        # Buttons
+        self._save_btn = QPushButton("\u4fdd\u5b58")
+        self._save_btn.setCursor(Qt.PointingHandCursor)
+        self._save_btn.setStyleSheet(
+            "QPushButton { border:none; border-radius:6px; padding:8px 24px; "
+            "background:#4CAF50; color:white; font-size:13px; }"
             "QPushButton:hover { background:#388E3C; }"
         )
-        close_btn.clicked.connect(self.close)
+        self._save_btn.clicked.connect(self._on_save)
+
+        self._cancel_btn = QPushButton("\u53d6\u6d88")
+        self._cancel_btn.setCursor(Qt.PointingHandCursor)
+        self._cancel_btn.setStyleSheet(
+            "QPushButton { border:1px solid #ccc; border-radius:6px; padding:8px 24px; "
+            "background:white; color:#333; font-size:13px; }"
+            "QPushButton:hover { background:#f5f5f5; }"
+        )
+        self._cancel_btn.clicked.connect(self.reject)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        btn_row.addWidget(close_btn)
+        btn_row.addWidget(self._save_btn)
+        btn_row.addSpacing(8)
+        btn_row.addWidget(self._cancel_btn)
         layout.addLayout(btn_row)
+
+        # Load existing personality
+        s = QSettings("MyApp", "AIDesktopPet")
+        saved = s.value("personality", "", str)
+        if saved:
+            self._editor.setPlainText(saved)
+
+    def _on_save(self):
+        """Save personality to QSettings and accept."""
+        s = QSettings("MyApp", "AIDesktopPet")
+        s.setValue("personality", self._editor.toPlainText())
+        s.sync()
+        self.accept()
 
 
 class PetWindow(QMainWindow):
