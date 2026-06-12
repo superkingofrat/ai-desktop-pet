@@ -7,3 +7,5 @@ pydantic>=2.0.0
 json-repair>=0.25.0
 PyQt5>=5.15.0
 fastembed>=0.3.0
+pywin32>=300
+psutil>=5.9.0
