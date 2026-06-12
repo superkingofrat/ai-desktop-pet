@@ -106,23 +106,24 @@ CHAT_H = 460
 
 # -- Pet icon helpers --------------------------------------------------
 def _icon_to_b64(pm):
-    """QPixmap -> base64 string for QSettings."""
-    import base64
-    data = QByteArray()
-    buf = QBuffer(data)
-    buf.open(QIODevice.WriteOnly)
-    pm.save(buf, "PNG")
-    buf.close()
-    return base64.b64encode(bytes(data)).decode("ascii")
+    """QPixmap -> base64 string (uses temp file for reliability)."""
+    import base64, tempfile, os
+    tmp = tempfile.mktemp(suffix=".png")
+    pm.save(tmp)
+    with open(tmp, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("ascii")
+    os.unlink(tmp)
+    return b64
 
 
 def _b64_to_icon(b64_str):
     """base64 string -> QPixmap."""
     import base64
-    raw = QByteArray.fromBase64(b64_str.encode("ascii"))
+    raw = base64.b64decode(b64_str)
     pm = QPixmap()
-    pm.loadFromData(bytes(raw))
+    pm.loadFromData(raw)
     return pm
+
 class ChatDialog(QDialog):
     """Frameless chat popup with bubble messages, styled input, status indicator."""
 
