@@ -30,6 +30,7 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtGui import QColor, QPainter, QPixmap
 from PyQt5.QtNetwork import QAbstractSocket
+from frontend.idle_detector import get_idle_seconds
 from frontend.pet_animator import (
     PetState,
     PetAnimator,
@@ -373,6 +374,17 @@ class ChatDialog(QDialog):
                 "background:#999; border-radius:5px;"
             )
 
+    def send_idle_greeting(self):
+        """Send a proactive greeting via WebSocket (no user bubble shown)."""
+        if self._ws.state() != QAbstractSocket.ConnectedState:
+            return
+        self._ws.sendTextMessage(
+            __import__("json").dumps({
+                "content": "用户已有一段时间没有操作了，请主动打个招呼，语气要友好",
+                "stream": True,
+            })
+        )
+
     def _on_user_message(self, text):
         if self._ws.state() != QAbstractSocket.ConnectedState:
             self._add_sys("Backend offline. Start: uvicorn backend.main:app")
@@ -610,12 +622,40 @@ class PetWindow(QMainWindow):
         self._timer.start(60_000)
         self._apply_custom_icon()
         self._setup_animator()
+        self._last_idle_greeting = 0.0
+        self._idle_timer = QTimer(self)
+        self._idle_timer.timeout.connect(self._check_idle)
+        self._idle_timer.start(300_000)  # 5 min
 
     # -- Day / night ------------------------------------------------
 
     def _compute_phase(self):
         hour = QTime.currentTime().hour()
         return "night" if hour >= 18 or hour < 6 else "day"
+
+    def _check_idle(self):
+        """Check idle time; send proactive greeting if user is AFK."""
+        idle = get_idle_seconds()
+        if idle < 600:  # less than 10 min
+            return
+        if idle > 3600:  # likely API error
+            return
+        import time
+        now = time.time()
+        if now - self._last_idle_greeting < 300:  # already greeted in 5 min
+            return
+        self._last_idle_greeting = now
+        # Open chat if needed, then send greeting
+        if self._chat is None or not self._chat.isVisible():
+            self._toggle_chat()
+            QTimer.singleShot(2500, self._do_idle_greeting)
+        else:
+            self._do_idle_greeting()
+
+    def _do_idle_greeting(self):
+        """Send idle greeting via the active ChatDialog."""
+        if self._chat is not None and self._chat.isVisible():
+            self._chat.send_idle_greeting()
 
     def _setup_animator(self):
         """Detect resources and create pet animator."""
@@ -637,6 +677,10 @@ class PetWindow(QMainWindow):
             a.hot_swap(rt, folder=res["config"]["folder"])
         else:
             self._setup_animator()
+        self._last_idle_greeting = 0.0
+        self._idle_timer = QTimer(self)
+        self._idle_timer.timeout.connect(self._check_idle)
+        self._idle_timer.start(300_000)  # 5 min
 
     def _apply_phase(self):
         if self._custom_icon_active:
