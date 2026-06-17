@@ -1,39 +1,94 @@
-"""Idle detection — Windows-only, uses GetLastInputInfo."""
+"""Idle detection — listens for global keyboard/mouse events via pynput."""
 
 from __future__ import annotations
 
-import ctypes
-from ctypes import wintypes
+import logging
+import threading
+import time
+from typing import Any
 
-_USER32 = ctypes.windll.user32
-_KERNEL32 = ctypes.windll.kernel32
+logger = logging.getLogger("assistant.idle_detector")
+
+_last_activity = time.time()
+_lock = threading.Lock()
+_listeners: list[Any] = []
 
 
-class _LASTINPUTINFO(ctypes.Structure):
-    _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+# ── Lazy import ──────────────────────────────────────────────
+try:
+    from pynput import keyboard, mouse
+
+    _HAS_PYNPUT = True
+except ImportError:
+    _HAS_PYNPUT = False
+    keyboard = None  # type: ignore
+    mouse = None  # type: ignore
 
 
-def get_idle_seconds() -> int:
-    """Return seconds since last keyboard/mouse input.
+# ── Shared callback (debounced) ──────────────────────────────
+_last_update_tick = 0.0
 
-    Returns 0 if the API call fails or the result seems invalid (> 1 hour).
+
+def _on_any_activity(*_args: Any) -> None:
+    """Called on every input event; updates the activity timestamp (debounced)."""
+    global _last_activity, _last_update_tick
+    with _lock:
+        now = time.time()
+        if now - _last_update_tick >= 0.5:  # max 2 updates / sec
+            _last_update_tick = now
+            _last_activity = now
+
+
+# ── Public API ───────────────────────────────────────────────
+
+def get_idle_seconds() -> float:
+    """Return seconds since the last detected keyboard/mouse event."""
+    with _lock:
+        return time.time() - _last_activity
+
+
+def start_listeners() -> bool:
+    """Start pynput listeners in daemon background threads.
+
+    Returns True if listeners started, False if pynput is unavailable.
     """
-    try:
-        info = _LASTINPUTINFO()
-        info.cbSize = ctypes.sizeof(_LASTINPUTINFO)
+    global _listeners
+    if not _HAS_PYNPUT:
+        logger.warning("pynput not installed — idle detection disabled")
+        return False
 
-        if not _USER32.GetLastInputInfo(ctypes.byref(info)):
-            return 0
+    if _listeners:
+        return True  # already running
 
-        current_ticks = _KERNEL32.GetTickCount()
-        if current_ticks < info.dwTime:  # overflow
-            return 0
+    kl = keyboard.Listener(on_press=_on_any_activity, on_release=_on_any_activity)
+    kl.daemon = True
+    kl.start()
+    _listeners.append(kl)
 
-        idle_ms = current_ticks - info.dwTime
-        if idle_ms > 3_600_000:  # > 1 hour = likely bug
-            return 0
+    ml = mouse.Listener(
+        on_move=_on_any_activity,
+        on_click=_on_any_activity,
+        on_scroll=_on_any_activity,
+    )
+    ml.daemon = True
+    ml.start()
+    _listeners.append(ml)
 
-        return max(0, idle_ms // 1000)
+    logger.info("Idle detection started (pynput)")
+    return True
 
-    except Exception:
-        return 0
+
+def stop_listeners() -> None:
+    """Stop all pynput listeners."""
+    global _listeners
+    for lis in _listeners:
+        try:
+            lis.stop()
+        except Exception:
+            pass
+    _listeners = []
+    logger.info("Idle detection stopped")
+
+
+# ── Auto-start on import ────────────────────────────────────
+_listeners_started = start_listeners()
