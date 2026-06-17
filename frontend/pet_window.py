@@ -411,6 +411,30 @@ class ChatDialog(QDialog):
         self._last_user_message = text
         self.add_message_bubble(text, "user")
         self._on_user_message(text)
+        self._detect_and_store_preference(text)
+
+    def _detect_and_store_preference(self, text: str) -> None:
+        keywords = ("我喜欢", "我习惯")
+        content = None
+        matched_kw = None
+        for kw in keywords:
+            if kw in text:
+                idx = text.find(kw) + len(kw)
+                content = text[idx:].strip()
+                matched_kw = kw
+                break
+        if not content:
+            return
+        try:
+            from db.database import Database, add_memory, search_memories
+            db = Database()
+            existing = search_memories(db, content[:15])
+            for mem in existing:
+                if mem.get("memory_type") == "preference" and content in mem.get("content", ""):
+                    return
+            add_memory(db, f"偏好 ({matched_kw}): {content}", "preference")
+        except Exception:
+            pass
 
     def _on_ws_message(self, raw):
         try:
@@ -433,7 +457,6 @@ class ChatDialog(QDialog):
 
             if self._is_idle_greeting:
                 self._is_idle_greeting = False
-        self._last_user_message = ""
                 pw = getattr(self, "_parent_win", None)
                 if pw is not None:
                     pw.set_unread_status(True)
