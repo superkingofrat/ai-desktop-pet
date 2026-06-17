@@ -158,6 +158,7 @@ class ChatDialog(QDialog):
         self._status_dot.setStyleSheet("background: #999; border-radius:5px;")
         self._pulse_on = False
         self._parent_win = parent_win
+        self._is_idle_greeting = False
         self._personality = QSettings("MyApp", "AIDesktopPet").value("personality", "", str)
         self._stream_cb = QCheckBox("Stream")
         self._stream_cb.setChecked(True)
@@ -384,6 +385,7 @@ class ChatDialog(QDialog):
                 "stream": True,
             })
         )
+        self._is_idle_greeting = True
         return True
 
     def _on_user_message(self, text):
@@ -417,6 +419,11 @@ class ChatDialog(QDialog):
             self._append_stream(c)
         elif t in ("done", "reply"):
             self._finalize(c)
+            if self._is_idle_greeting:
+                self._is_idle_greeting = False
+                pw = getattr(self, "_parent_win", None)
+                if pw is not None:
+                    pw.set_unread_status(True)
         elif t == "thinking":
             self._add_sys(c)
         elif t == "tool_call":
@@ -595,6 +602,7 @@ class SettingsDialog(QDialog):
 
 
 class PetWindow(QMainWindow):
+    new_active_message = pyqtSignal(str)
     """Frameless transparent pet with day/night images, jelly click, and chat."""
 
     def __init__(self):
@@ -664,6 +672,21 @@ class PetWindow(QMainWindow):
         ok = self._chat.send_idle_greeting()
         if ok:
             self._badge.show()
+
+    def set_unread_status(self, has_unread: bool) -> None:
+        """Update unread flag; show badge only if chat is closed."""
+        self.has_unread_active_message = has_unread
+        if has_unread:
+            if self._chat is None or not self._chat.isVisible():
+                self._badge.show()
+            else:
+                self._badge.hide()
+        else:
+            self._badge.hide()
+
+    def on_active_message_received(self, message: str) -> None:
+        """Handle proactive message arrival."""
+        self.set_unread_status(True)
 
     def _setup_animator(self):
         """Detect resources and create pet animator."""
