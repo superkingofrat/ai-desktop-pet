@@ -379,12 +379,14 @@ class ChatDialog(QDialog):
         """Send a proactive greeting via WebSocket (no user bubble shown)."""
         if self._ws.state() != QAbstractSocket.ConnectedState:
             return False
+        self._add_sys("Sending idle greeting via WS...")
         self._ws.sendTextMessage(
             __import__("json").dumps({
-                "content": "用户已有一段时间没有操作了，请主动打个招呼，语气要友好",
+                "content": "User has been idle. Say hello!",
                 "stream": True,
             })
         )
+        self._add_sys("Greeting sent, waiting for AI response...")
         self._is_idle_greeting = True
         return True
 
@@ -642,7 +644,7 @@ class PetWindow(QMainWindow):
         self._last_idle_greeting = 0.0
         self._idle_timer = QTimer(self)
         self._idle_timer.timeout.connect(self._check_idle)
-        self._idle_timer.start(300_000)  # 5 min
+        self._idle_timer.start(7_000)  # 5 min
 
     # -- Day / night ------------------------------------------------
 
@@ -653,25 +655,28 @@ class PetWindow(QMainWindow):
     def _check_idle(self):
         """Check idle time; send greeting and show badge."""
         idle = get_idle_seconds()
-        if idle < 600 or idle > 3600:
+        if idle < 5 or idle > 3600:
             return
         import time
         now = time.time()
-        if now - self._last_idle_greeting < 300:
+        if now - self._last_idle_greeting < 10:
             return
         self._last_idle_greeting = now
         if self._chat is None:
-            self._chat = ChatDialog(self.geometry().topLeft())
+            self._chat = ChatDialog(self.geometry().topLeft(), parent_win=self)
             self._chat.destroyed.connect(self._on_chat_destroyed)
-        QTimer.singleShot(500, self._do_idle_greeting)
+        QTimer.singleShot(1500, self._do_idle_greeting)
 
     def _do_idle_greeting(self):
-        """Send greeting; show badge instead of opening chat."""
+        """Send greeting; show badge (retry if WS not ready)."""
         if self._chat is None:
             return
         ok = self._chat.send_idle_greeting()
         if ok:
-            self._badge.show()
+            self.set_unread_status(True)
+        elif getattr(self, '_idle_greet_retry', 0) < 3:
+            self._idle_greet_retry = getattr(self, '_idle_greet_retry', 0) + 1
+            QTimer.singleShot(2000, self._do_idle_greeting)
 
     def set_unread_status(self, has_unread: bool) -> None:
         """Update unread flag; show badge only if chat is closed."""
@@ -711,7 +716,7 @@ class PetWindow(QMainWindow):
         self._last_idle_greeting = 0.0
         self._idle_timer = QTimer(self)
         self._idle_timer.timeout.connect(self._check_idle)
-        self._idle_timer.start(300_000)  # 5 min
+        self._idle_timer.start(7_000)  # 5 min
 
     def _apply_phase(self):
         if self._custom_icon_active:
@@ -810,16 +815,17 @@ class PetWindow(QMainWindow):
         g.start(QAbstractAnimation.DeleteWhenStopped)
 
     def _toggle_chat(self):
-        # Close existing chat
-        if self._chat is not None:
+        self.set_unread_status(False)
+        if self._chat is not None and self._chat.isVisible():
             old = self._chat
-            self._chat = None  # clear FIRST so _on_click can't re-enter
+            self._chat = None
             old.close()
             old.deleteLater()
             return
-
-        # Create new chat (use local var to avoid race with destroyed signal)
-        dlg = ChatDialog(self.geometry().topLeft())
+        if self._chat is not None:
+            self._chat.show()
+            return
+        dlg = ChatDialog(self.geometry().topLeft(), parent_win=self)
         dlg.destroyed.connect(self._on_chat_destroyed)
         dlg.show()
         self._chat = dlg
