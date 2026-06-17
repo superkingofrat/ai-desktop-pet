@@ -377,13 +377,14 @@ class ChatDialog(QDialog):
     def send_idle_greeting(self):
         """Send a proactive greeting via WebSocket (no user bubble shown)."""
         if self._ws.state() != QAbstractSocket.ConnectedState:
-            return
+            return False
         self._ws.sendTextMessage(
             __import__("json").dumps({
                 "content": "用户已有一段时间没有操作了，请主动打个招呼，语气要友好",
                 "stream": True,
             })
         )
+        return True
 
     def _on_user_message(self, text):
         if self._ws.state() != QAbstractSocket.ConnectedState:
@@ -609,6 +610,14 @@ class PetWindow(QMainWindow):
         self._label.setGeometry(0, 0, SIZE.width(), SIZE.height())
         self._label.clicked.connect(self._on_click)
 
+        # Unread badge (red dot, top-right corner)
+        self._badge = QLabel(self)
+        self._badge.setFixedSize(16, 16)
+        self._badge.setStyleSheet("QLabel { background:#FF4444; border-radius:8px; }")
+        self._badge.move(SIZE.width() - 20, 2)
+        self._badge.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._badge.hide()
+
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
@@ -634,28 +643,27 @@ class PetWindow(QMainWindow):
         return "night" if hour >= 18 or hour < 6 else "day"
 
     def _check_idle(self):
-        """Check idle time; send proactive greeting if user is AFK."""
+        """Check idle time; send greeting and show badge."""
         idle = get_idle_seconds()
-        if idle < 600:  # less than 10 min
-            return
-        if idle > 3600:  # likely API error
+        if idle < 600 or idle > 3600:
             return
         import time
         now = time.time()
-        if now - self._last_idle_greeting < 300:  # already greeted in 5 min
+        if now - self._last_idle_greeting < 300:
             return
         self._last_idle_greeting = now
-        # Open chat if needed, then send greeting
-        if self._chat is None or not self._chat.isVisible():
-            self._toggle_chat()
-            QTimer.singleShot(2500, self._do_idle_greeting)
-        else:
-            self._do_idle_greeting()
+        if self._chat is None:
+            self._chat = ChatDialog(self.geometry().topLeft())
+            self._chat.destroyed.connect(self._on_chat_destroyed)
+        QTimer.singleShot(500, self._do_idle_greeting)
 
     def _do_idle_greeting(self):
-        """Send idle greeting via the active ChatDialog."""
-        if self._chat is not None and self._chat.isVisible():
-            self._chat.send_idle_greeting()
+        """Send greeting; show badge instead of opening chat."""
+        if self._chat is None:
+            return
+        ok = self._chat.send_idle_greeting()
+        if ok:
+            self._badge.show()
 
     def _setup_animator(self):
         """Detect resources and create pet animator."""
