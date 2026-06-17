@@ -9,6 +9,7 @@ from typing import Any, AsyncIterator
 from bus.queue import MessageBus
 from agent.tools.registry import ToolRegistry
 from providers.deepseek_provider import DeepSeekProvider
+from db.database import Database, get_recent_memories
 
 logger = logging.getLogger("assistant.agent.loop")
 
@@ -100,6 +101,27 @@ class AgentLoop:
             # Load conversation history from DB
             db_history = conversation_manager.get_history(session_id, limit=10)
             messages.extend(db_history)
+            try:
+                from db.database import Database, get_recent_memories
+                db = Database()
+                conv = get_recent_memories(db, limit=5, memory_type="conversation")
+                prefs = get_recent_memories(db, limit=100, memory_type="preference")
+                lines = []
+                if conv:
+                    lines.append("--- \u6700\u8fd1\u5bf9\u8bdd ---")
+                    for m in conv:
+                        lines.append(m['content'])
+                if prefs:
+                    lines.append("--- \u7528\u6237\u504f\u597d ---")
+                    for p in prefs:
+                        lines.append(f"- {p['content']}")
+                if lines:
+                    messages.append({
+                        "role": "system",
+                        "content": "\u4ee5\u4e0b\u662f\u7528\u6237\u7684\u5386\u53f2\u5bf9\u8bdd\u548c\u504f\u597d\uff0c\u8bf7\u53c2\u8003\u8fd9\u4e9b\u4e0a\u4e0b\u6587\u6765\u56de\u7b54\uff1a\n" + "\n".join(lines),
+                    })
+            except Exception:
+                pass
         elif history:
             messages.extend(history)
 
