@@ -63,3 +63,74 @@ class Database:
         with self.get_conn() as conn:
             conn.executescript(self.SCHEMA_SQL)
         logger.info("Database ready: %s", self.db_path)
+
+# ---------------------------------------------------------------------------
+# Memory functions
+# ---------------------------------------------------------------------------
+
+def create_memory_table(db: Database) -> None:
+    # Create the memory table if it does not already exist.
+    with db.get_conn() as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS memory (\n"
+            "    id          INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+            "    user_id     INTEGER DEFAULT 1,\n"
+            "    content     TEXT NOT NULL,\n"
+            "    memory_type TEXT NOT NULL DEFAULT 'conversation',\n"
+            "    timestamp   TEXT NOT NULL DEFAULT (datetime('now'))\n"
+            ")"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_type \n"
+            "ON memory(memory_type, timestamp)"
+        )
+    logger.info("Memory table ready")
+
+
+def add_memory(
+    db: Database,
+    content: str,
+    memory_type: str = "conversation",
+) -> int:
+    # Insert a memory record and return its new ID.
+    with db.get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO memory (content, memory_type) VALUES (?, ?)",
+            (content, memory_type),
+        )
+        return cur.lastrowid or 0
+
+
+def get_recent_memories(
+    db: Database,
+    limit: int = 5,
+    memory_type: str | None = None,
+) -> list[dict]:
+    # Return the most recent *limit* memories, optionally filtered by type.
+    with db.get_conn() as conn:
+        if memory_type:
+            rows = conn.execute(
+                "SELECT id, user_id, content, memory_type, timestamp "
+                "FROM memory WHERE memory_type = ? "
+                "ORDER BY id DESC LIMIT ?",
+                (memory_type, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, user_id, content, memory_type, timestamp "
+                "FROM memory ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    return [dict(r) for r in reversed(rows)]
+
+
+def search_memories(db: Database, keyword: str) -> list[dict]:
+    # Return all memories whose content contains *keyword*.
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, content, memory_type, timestamp "
+            "FROM memory WHERE content LIKE ? "
+            "ORDER BY id DESC",
+            (f"%{keyword}%",),
+        ).fetchall()
+    return [dict(r) for r in rows]

@@ -644,7 +644,7 @@ class PetWindow(QMainWindow):
         self._last_idle_greeting = 0.0
         self._idle_timer = QTimer(self)
         self._idle_timer.timeout.connect(self._check_idle)
-        self._idle_timer.start(300_000)  # 5 min
+        self._idle_timer.start(7_000)  # 5 min
 
     # -- Day / night ------------------------------------------------
 
@@ -655,7 +655,7 @@ class PetWindow(QMainWindow):
     def _check_idle(self):
         """Check idle time; send greeting and show badge."""
         idle = get_idle_seconds()
-        if idle < 600 or idle > 3600:
+        if idle < 5 or idle > 3600:
             return
         import time
         now = time.time()
@@ -717,7 +717,7 @@ class PetWindow(QMainWindow):
         self._last_idle_greeting = 0.0
         self._idle_timer = QTimer(self)
         self._idle_timer.timeout.connect(self._check_idle)
-        self._idle_timer.start(300_000)  # 5 min
+        self._idle_timer.start(7_000)  # 5 min
 
     def _apply_phase(self):
         if self._custom_icon_active:
