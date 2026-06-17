@@ -6,6 +6,7 @@ import json
 import logging
 import sys as _sys
 from contextlib import asynccontextmanager
+import asyncio
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
@@ -14,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 from backend.core.config import settings
+from perception import get_active_window_title
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,6 +32,8 @@ _agent_loop = None
 _db = None
 _cm = None
 _cache = None
+_window_clients: set[WebSocket] = set()
+_window_task = None
 
 
 @asynccontextmanager
@@ -55,7 +59,14 @@ async def lifespan(app: FastAPI):
 
     logger.info("Auto-registered tools: %s", _agent_loop.tools.tool_names)
     logger.info("AI Assistant backend started  (cache=%s)", _cache is not None)
+    global _window_task
+    _window_task = asyncio.create_task(_window_monitor_loop())
     yield
+    _window_task.cancel()
+    try:
+        await _window_task
+    except asyncio.CancelledError:
+        pass
     logger.info("AI Assistant backend shutting down")
     _agent_loop = None
     _provider = None
@@ -223,6 +234,42 @@ async def ws_chat(
             }))
         except Exception:
             pass
+
+
+async def _window_monitor_loop():
+    """Background task: poll active window every 5s and broadcast changes."""
+    last_title = None
+    while True:
+        await asyncio.sleep(5)
+        try:
+            title = get_active_window_title()
+            if title and title != last_title:
+                last_title = title
+                msg = json.dumps({
+                    "type": "window_change",
+                    "title": title,
+                })
+                dead = set()
+                for ws in _window_clients:
+                    try:
+                        await ws.send_text(msg)
+                    except Exception:
+                        dead.add(ws)
+                _window_clients -= dead
+        except Exception:
+            pass
+
+
+@app.websocket("/ws/window")
+async def ws_window(websocket: WebSocket):
+    """WebSocket endpoint for active-window change events."""
+    await websocket.accept()
+    _window_clients.add(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        _window_clients.discard(websocket)
 
 
 if __name__ == "__main__":
