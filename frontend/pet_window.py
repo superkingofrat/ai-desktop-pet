@@ -375,14 +375,14 @@ class ChatDialog(QDialog):
                 "background:#999; border-radius:5px;"
             )
 
-    def send_idle_greeting(self):
-        """Send a proactive greeting via WebSocket (no user bubble shown)."""
+    def send_idle_greeting(self, activity=None):
+        """Send a context-aware greeting via WebSocket."""
         if self._ws.state() != QAbstractSocket.ConnectedState:
             return False
         self._add_sys("Sending idle greeting via WS...")
         self._ws.sendTextMessage(
             __import__("json").dumps({
-                "content": "用户已有一段时间没有操作了，请主动打个招呼，语气要友好",
+                "content": "(当前活动: {}) 用户已有一段时间没有操作，请根据他正在使用的应用场景主动发起一个友好的问候或提供帮助建议。".format(activity or "未知"),
                 "stream": True,
             })
         )
@@ -644,7 +644,7 @@ class PetWindow(QMainWindow):
         self._last_idle_greeting = 0.0
         self._idle_timer = QTimer(self)
         self._idle_timer.timeout.connect(self._check_idle)
-        self._idle_timer.start(7_000)  # 5 min
+        self._idle_timer.start(300_000)  # 5 min
 
     # -- Day / night ------------------------------------------------
 
@@ -655,7 +655,7 @@ class PetWindow(QMainWindow):
     def _check_idle(self):
         """Check idle time; send greeting and show badge."""
         idle = get_idle_seconds()
-        if idle < 5 or idle > 3600:
+        if idle < 600 or idle > 3600:
             return
         import time
         now = time.time()
@@ -668,10 +668,11 @@ class PetWindow(QMainWindow):
         QTimer.singleShot(1500, self._do_idle_greeting)
 
     def _do_idle_greeting(self):
-        """Send greeting; show badge (retry if WS not ready)."""
+        """Send greeting with current activity context; show badge (retry if WS not ready)."""
         if self._chat is None:
             return
-        ok = self._chat.send_idle_greeting()
+        activity = __import__("perception", fromlist=["get_active_window_title"]).get_active_window_title()
+        ok = self._chat.send_idle_greeting(activity)
         if ok:
             self.set_unread_status(True)
         elif getattr(self, '_idle_greet_retry', 0) < 3:
@@ -716,7 +717,7 @@ class PetWindow(QMainWindow):
         self._last_idle_greeting = 0.0
         self._idle_timer = QTimer(self)
         self._idle_timer.timeout.connect(self._check_idle)
-        self._idle_timer.start(7_000)  # 5 min
+        self._idle_timer.start(300_000)  # 5 min
 
     def _apply_phase(self):
         if self._custom_icon_active:
