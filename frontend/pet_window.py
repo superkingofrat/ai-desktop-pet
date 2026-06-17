@@ -382,7 +382,7 @@ class ChatDialog(QDialog):
         self._add_sys("Sending idle greeting via WS...")
         self._ws.sendTextMessage(
             __import__("json").dumps({
-                "content": "User has been idle. Say hello!",
+                "content": "用户已有一段时间没有操作了，请主动打个招呼，语气要友好",
                 "stream": True,
             })
         )
