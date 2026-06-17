@@ -159,6 +159,7 @@ class ChatDialog(QDialog):
         self._pulse_on = False
         self._parent_win = parent_win
         self._is_idle_greeting = False
+        self._last_user_message = ""
         self._personality = QSettings("MyApp", "AIDesktopPet").value("personality", "", str)
         self._stream_cb = QCheckBox("Stream")
         self._stream_cb.setChecked(True)
@@ -407,6 +408,7 @@ class ChatDialog(QDialog):
         if not text:
             return
         self._input_field.clear()
+        self._last_user_message = text
         self.add_message_bubble(text, "user")
         self._on_user_message(text)
 
@@ -421,8 +423,17 @@ class ChatDialog(QDialog):
             self._append_stream(c)
         elif t in ("done", "reply"):
             self._finalize(c)
+            if self._last_user_message and c:
+                try:
+                    from db.database import Database, add_memory as _mem
+                    _mem(Database(), f"\u7528\u6237: {self._last_user_message}\n\u52a9\u624b: {c}", "conversation")
+                except Exception:
+                    pass
+                self._last_user_message = ""
+
             if self._is_idle_greeting:
                 self._is_idle_greeting = False
+        self._last_user_message = ""
                 pw = getattr(self, "_parent_win", None)
                 if pw is not None:
                     pw.set_unread_status(True)
