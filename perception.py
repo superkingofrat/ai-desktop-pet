@@ -21,7 +21,19 @@ from PIL import Image
 
 
 # Entertainment keywords (case-insensitive)
-_ENTERTAINMENT_KW = ["游戏", "视频", "抖音", "微博", "bilibili", "youtube", "netflix", "game"]
+ENTERTAINMENT_KEYWORDS = [
+    "youtube",
+    "哔哩哔哩",
+    "bilibili",
+    "twitch",
+    "netflix",
+    "steam",
+    "游戏",
+    "game",
+    "douyin",
+    "tiktok",
+    "spotify",
+]
 
 
 def is_entertainment_app(title: str | None) -> bool:
@@ -29,7 +41,7 @@ def is_entertainment_app(title: str | None) -> bool:
     if not title:
         return False
     lower = title.lower()
-    return any(kw in lower for kw in _ENTERTAINMENT_KW)
+    return any(kw in lower for kw in ENTERTAINMENT_KEYWORDS)
 
 
 # ── Active window ─────────────────────────────────────────────
