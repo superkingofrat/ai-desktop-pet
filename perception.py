@@ -20,6 +20,18 @@ except ImportError:
 from PIL import Image
 
 
+# Entertainment keywords (case-insensitive)
+_ENTERTAINMENT_KW = ["游戏", "视频", "抖音", "微博", "bilibili", "youtube", "netflix", "game"]
+
+
+def is_entertainment_app(title: str | None) -> bool:
+    """Return True if *title* contains entertainment-related keywords."""
+    if not title:
+        return False
+    lower = title.lower()
+    return any(kw in lower for kw in _ENTERTAINMENT_KW)
+
+
 # ── Active window ─────────────────────────────────────────────
 
 def get_active_window_title() -> str | None:
