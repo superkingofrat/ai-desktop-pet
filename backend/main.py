@@ -15,7 +15,9 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 from backend.core.config import settings
-from perception import get_active_window_title
+from perception import get_active_window_title, is_entertainment_app
+
+FOCUS_THRESHOLD = 900  # 15 min
 
 logging.basicConfig(
     level=logging.INFO,
@@ -236,15 +238,54 @@ async def ws_chat(
             pass
 
 
+async def _send_focus_reminder(title: str, duration: float):
+    """Send focus-reminder via /ws/window with personalized tip."""
+    minutes = int(duration / 60)
+    tip = ""
+    try:
+        from db.database import Database, search_memories
+        db = Database()
+        prefs = search_memories(db, "")
+        for p in prefs:
+            if p.get("memory_type") == "preference":
+                content = p.get("content", "")
+                if any(kw in content for kw in ("工作", "学习", "专注")):
+                    tip = f"\u4f60\u4e4b\u524d\u63d0\u5230 {content}\uff0c\u8981\u5207\u6362\u56de\u5de5\u4f5c\u5417\uff1f"
+                    break
+    except Exception:
+        pass
+
+    msg = __import__("json").dumps({
+        "type": "focus_reminder",
+        "app": title,
+        "duration_minutes": minutes,
+        "message": f"\u4f60\u5df2\u4f7f\u7528 {title} {minutes} \u5206\u949f\uff0c\u5efa\u8bae\u4f11\u606f\u4e00\u4e0b",
+        "personalized_tip": tip,
+    })
+
+    dead = set()
+    for ws in _window_clients:
+        try:
+            await ws.send_text(msg)
+        except Exception:
+            dead.add(ws)
+    _window_clients -= dead
+
+
 async def _window_monitor_loop():
-    """Background task: poll active window every 5s and broadcast changes."""
+    """Background task: poll active window, track entertainment, send reminders."""
     last_title = None
+    activity_start_time = None
+
     while True:
         await asyncio.sleep(5)
         try:
             title = get_active_window_title()
+            now = time.time()
+
             if title and title != last_title:
                 last_title = title
+                activity_start_time = now
                 msg = json.dumps({
                     "type": "window_change",
                     "title": title,
@@ -256,6 +297,13 @@ async def _window_monitor_loop():
                     except Exception:
                         dead.add(ws)
                 _window_clients -= dead
+
+            if title and activity_start_time is not None:
+                if is_entertainment_app(title):
+                    duration = now - activity_start_time
+                    if duration > FOCUS_THRESHOLD:
+                        await _send_focus_reminder(title, duration)
+                        activity_start_time = now
         except Exception:
             pass
 
@@ -270,6 +318,22 @@ async def ws_window(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         _window_clients.discard(websocket)
+
+
+@app.post("/focus-feedback")
+async def focus_feedback(data: dict):
+    """Store user feedback from focus-reminder dialog."""
+    choice = data.get("choice", "")
+    app_name = data.get("app", "")
+    msg = f"\u7528\u6237\u9009\u62e9: {choice}"
+    if app_name:
+        msg += f" (\u5e94\u7528: {app_name})"
+    try:
+        from db.database import Database, add_memory
+        add_memory(Database(), msg, "focus_feedback")
+    except Exception:
+        pass
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
