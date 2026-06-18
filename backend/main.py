@@ -272,6 +272,18 @@ async def _send_focus_reminder(title: str, duration: float):
     _window_clients -= dead
 
 
+async def send_alert(message: str):
+    """Send an alert message to all connected /ws/window clients."""
+    msg = __import__("json").dumps({"type": "alert", "content": message})
+    dead = set()
+    for ws in _window_clients:
+        try:
+            await ws.send_text(msg)
+        except Exception:
+            dead.add(ws)
+    _window_clients -= dead
+
+
 async def _window_monitor_loop():
     """Background task: poll active window, track entertainment, send reminders."""
     last_title = None
