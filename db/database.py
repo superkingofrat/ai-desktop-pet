@@ -1,4 +1,4 @@
-"""SQLite database — connection, table creation, and session management."""
+﻿"""SQLite database 鈥?connection, table creation, and session management."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class Database:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_tables()
 
-    # ── Schema ──────────────────────────────────────────────────
+    # 鈹€鈹€ Schema 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS sessions (
@@ -45,9 +45,16 @@ class Database:
 
     CREATE INDEX IF NOT EXISTS idx_messages_session
         ON messages(session_id, id);
+
+    CREATE TABLE IF NOT EXISTS daily_reports (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        report_date TEXT UNIQUE NOT NULL,
+        content     TEXT NOT NULL,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
     """
 
-    # ── Public API ──────────────────────────────────────────────
+    # 鈹€鈹€ Public API 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     def get_conn(self) -> sqlite3.Connection:
         """Return a new SQLite connection (row factory enabled)."""
@@ -57,7 +64,7 @@ class Database:
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
-    # ── Internals ───────────────────────────────────────────────
+    # 鈹€鈹€ Internals 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     def _init_tables(self) -> None:
         with self.get_conn() as conn:
@@ -134,3 +141,74 @@ def search_memories(db: Database, keyword: str) -> list[dict]:
             (f"%{keyword}%",),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Daily Report functions
+# ---------------------------------------------------------------------------
+
+def save_daily_report(db, report_date, content):
+    with db.get_conn() as conn:
+        cur = conn.execute(
+            "INSERT OR REPLACE INTO daily_reports (report_date, content, created_at) "
+            "VALUES (?, ?, datetime('now'))",
+            (report_date, content),
+        )
+        return cur.lastrowid or 0
+
+
+def get_daily_report(db, report_date):
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, report_date, content, created_at FROM daily_reports "
+            "WHERE report_date = ?",
+            (report_date,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_reports(db, start_date, end_date):
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, report_date, content, created_at FROM daily_reports "
+            "WHERE report_date >= ? AND report_date <= ? "
+            "ORDER BY report_date DESC",
+            (start_date, end_date),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Daily Report functions
+# ---------------------------------------------------------------------------
+
+def save_daily_report(db, report_date, content):
+    with db.get_conn() as conn:
+        cur = conn.execute(
+            "INSERT OR REPLACE INTO daily_reports (report_date, content, created_at) "
+            "VALUES (?, ?, datetime('now'))",
+            (report_date, content),
+        )
+        return cur.lastrowid or 0
+
+
+def get_daily_report(db, report_date):
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, report_date, content, created_at FROM daily_reports "
+            "WHERE report_date = ?",
+            (report_date,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_reports(db, start_date, end_date):
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, report_date, content, created_at FROM daily_reports "
+            "WHERE report_date >= ? AND report_date <= ? "
+            "ORDER BY report_date DESC",
+            (start_date, end_date),
+        ).fetchall()
+    return [dict(r) for r in rows]
+

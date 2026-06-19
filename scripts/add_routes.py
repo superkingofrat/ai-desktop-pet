@@ -1,19 +1,10 @@
-"""REST API routes — health check, session management, etc."""
-from __future__ import annotations
+﻿import os, py_compile
 
-import logging
+path = "E:/ai-assistant/backend/api/routes.py"
+with open(path, "r", encoding="utf-8") as f:
+    content = f.read()
 
-from fastapi import APIRouter
-
-logger = logging.getLogger("assistant.api")
-router = APIRouter()
-
-
-@router.get("/health")
-async def health():
-    """Health check endpoint (delegated from main app)."""
-    return {"status": "ok"}
-
+extra = '''
 
 from fastapi import Query
 from db.database import Database, get_daily_report, get_reports, save_daily_report
@@ -46,3 +37,12 @@ async def api_generate_report(
     content = await generate_daily_report(db, target)
     save_daily_report(db, target, content)
     return {"date": target, "content": content}
+'''
+
+content = content + extra
+
+with open(path, "w", encoding="utf-8") as f:
+    f.write(content)
+
+py_compile.compile(path, doraise=True)
+print("Routes OK")
