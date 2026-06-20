@@ -31,6 +31,9 @@ class Settings:
     # Data directories
     host_data_dir: str = field(default_factory=lambda: os.getenv("DATA_DIR", "./data"))
 
+    # App blocker (focus mode) — comma-separated process names
+    app_blacklist: list[str] = field(default_factory=lambda: _parse_blacklist(os.getenv("APP_BLACKLIST", "")))
+
     @property
     def data_dir(self) -> Path:
         return Path(self.host_data_dir)
@@ -49,6 +52,11 @@ class Settings:
     # Agent
     max_tool_iterations: int = 10
     max_history_size: int = 40
+
+
+def _parse_blacklist(raw: str) -> list[str]:
+    """Parse a comma-separated blacklist string into a stripped, lowercased list."""
+    return [name.strip().lower() for name in raw.split(",") if name.strip()]
 
 
 settings = Settings()

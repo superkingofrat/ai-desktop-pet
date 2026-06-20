@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 桌面宠物 · 数据看板</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0d0d1a;
+  color: #e0e0e0;
+  min-height: 100vh;
+  padding: 24px;
+}
+.header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 28px; flex-wrap: wrap; gap: 12px;
+}
+.header h1 {
+  font-size: 22px; font-weight: 600;
+  background: linear-gradient(135deg, #a78bfa, #60a5fa);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.controls { display: flex; gap: 10px; align-items: center; }
+.controls button {
+  padding: 8px 20px; border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px; background: rgba(255,255,255,0.05);
+  color: #b0b0b0; cursor: pointer; font-size: 13px;
+  transition: all 0.2s; backdrop-filter: blur(8px);
+}
+.controls button:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.controls button.active {
+  background: linear-gradient(135deg, rgba(167,139,250,0.3), rgba(96,165,250,0.3));
+  border-color: rgba(167,139,250,0.5); color: #fff;
+}
+.last-update { font-size: 12px; color: #666; }
+.grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+  max-width: 1200px; margin: 0 auto;
+}
+.card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px; padding: 20px;
+  backdrop-filter: blur(12px); position: relative;
+}
+.card h2 { font-size: 14px; font-weight: 500; color: #999; margin-bottom: 12px; }
+.chart-box { width: 100%; height: 260px; }
+.card.full { grid-column: 1 / -1; }
+.empty-state {
+  display: flex; align-items: center; justify-content: center;
+  height: 200px; color: #555; font-size: 14px; flex-direction: column; gap: 8px;
+}
+.empty-state .icon { font-size: 32px; opacity: 0.5; }
+@media (max-width: 768px) {
+  .grid { grid-template-columns: 1fr; }
+  body { padding: 16px; }
+  .header h1 { font-size: 18px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📊 数据看板</h1>
+  <div class="controls">
+    <span class="last-update" id="lastUpdate">—</span>
+    <button class="active" data-days="7" onclick="switchRange(7)">7 天</button>
+    <button data-days="30" onclick="switchRange(30)">30 天</button>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>💬 每日对话次数</h2>
+    <div class="chart-box" id="chartConversations"></div>
+  </div>
+  <div class="card">
+    <h2>✅ 待办完成率</h2>
+    <div class="chart-box" id="chartTodos"></div>
+  </div>
+  <div class="card">
+    <h2>🔒 专注模式触发</h2>
+    <div class="chart-box" id="chartFocus"></div>
+  </div>
+  <div class="card">
+    <h2>📋 日报生成情况</h2>
+    <div class="chart-box" id="chartReports"></div>
+  </div>
+</div>
+
+<script>
+let currentDays = 7;
+let refreshTimer = null;
+
+const charts = {};
+
+function initCharts() {
+  charts.conversations = echarts.init(document.getElementById('chartConversations'));
+  charts.todos = echarts.init(document.getElementById('chartTodos'));
+  charts.focus = echarts.init(document.getElementById('chartFocus'));
+  charts.reports = echarts.init(document.getElementById('chartReports'));
+}
+
+function getTheme() {
+  return {
+    axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
+    axisLabel: { color: '#888', fontSize: 11 },
+    splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } },
+  };
+}
+
+function renderConversations(data) {
+  const theme = getTheme();
+  charts.conversations.setOption({
+    tooltip: { trigger: 'axis', backgroundColor: 'rgba(20,20,40,0.9)', borderColor: '#333', textStyle: { color: '#e0e0e0', fontSize: 12 } },
+    grid: { left: 40, right: 16, top: 20, bottom: 28 },
+    xAxis: { type: 'category', data: data.dates, ...theme, axisLabel: { ...theme.axisLabel, rotate: 30 } },
+    yAxis: { type: 'value', minInterval: 1, ...theme },
+    series: [{
+      type: 'line', smooth: true, data: data.counts,
+      symbol: 'circle', symbolSize: 6,
+      lineStyle: { color: '#a78bfa', width: 2 },
+      areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(167,139,250,0.3)' }, { offset: 1, color: 'rgba(167,139,250,0)' }] } },
+      itemStyle: { color: '#a78bfa' },
+    }]
+  }, true);
+}
+
+function renderTodos(data) {
+  const total = data.total;
+  const done = data.done;
+  const pct = total > 0 ? Math.round(done / total * 100) : 0;
+  if (total === 0) {
+    const el = document.getElementById('chartTodos');
+    el.innerHTML = '<div class="empty-state"><div class="icon">📋</div>暂无待办事项</div>';
+    return;
+  }
+  charts.todos.setOption({
+    tooltip: { trigger: 'item', backgroundColor: 'rgba(20,20,40,0.9)', borderColor: '#333', textStyle: { color: '#e0e0e0', fontSize: 12 } },
+    series: [{
+      type: 'pie', radius: ['52%', '72%'], center: ['50%', '50%'],
+      avoidLabelOverlap: false,
+      label: { show: true, formatter: '{b}\n{d}%', color: '#bbb', fontSize: 12, fontWeight: 500 },
+      emphasis: { scale: false },
+      data: [
+        { value: done, name: '已完成', itemStyle: { color: '#4ade80' } },
+        { value: total - done, name: '未完成', itemStyle: { color: 'rgba(255,255,255,0.12)' } },
+      ]
+    }],
+    graphic: [{
+      type: 'text', left: 'center', top: '42%',
+      style: { text: pct + '%', fill: '#e0e0e0', fontSize: 22, fontWeight: 700, textAlign: 'center' }
+    }]
+  }, true);
+}
+
+function renderFocus(data) {
+  const hasData = data.counts.some(c => c > 0);
+  if (!hasData) {
+    const el = document.getElementById('chartFocus');
+    el.innerHTML = '<div class="empty-state"><div class="icon">🔒</div>暂无专注模式数据</div>';
+    return;
+  }
+  const theme = getTheme();
+  charts.focus.setOption({
+    tooltip: { trigger: 'axis', backgroundColor: 'rgba(20,20,40,0.9)', borderColor: '#333', textStyle: { color: '#e0e0e0', fontSize: 12 } },
+    grid: { left: 40, right: 16, top: 20, bottom: 28 },
+    xAxis: { type: 'category', data: data.dates, ...theme, axisLabel: { ...theme.axisLabel, rotate: 30 } },
+    yAxis: { type: 'value', minInterval: 1, ...theme },
+    series: [{
+      type: 'bar', data: data.counts,
+      itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#f472b6' }, { offset: 1, color: 'rgba(244,114,182,0.3)' }] }, borderRadius: [4,4,0,0] },
+    }]
+  }, true);
+}
+
+function renderReports(data) {
+  const hasAny = data.has_report.some(h => h);
+  if (!hasAny) {
+    const el = document.getElementById('chartReports');
+    el.innerHTML = '<div class="empty-state"><div class="icon">📋</div>暂无日报数据</div>';
+    return;
+  }
+  const items = data.dates.map((d, i) => ({ name: d, value: data.has_report[i] ? 1 : 0 }));
+  charts.reports.setOption({
+    tooltip: {
+      formatter: function(p) {
+        return p.name + '<br/>' + (p.value === 1 ? '✅ 有日报' : '❌ 无日报');
+      },
+      backgroundColor: 'rgba(20,20,40,0.9)', borderColor: '#333', textStyle: { color: '#e0e0e0', fontSize: 12 }
+    },
+    visualMap: { show: false, min: 0, max: 1, inRange: { color: ['rgba(255,255,255,0.08)', '#4ade80'] } },
+    calendar: {
+      range: data.dates[0] + '|' + data.dates[data.dates.length - 1],
+      cellSize: ['auto', 22],
+      itemStyle: { borderWidth: 2, borderColor: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.06)' },
+      splitLine: { show: false },
+      dayLabel: { color: '#666', fontSize: 11 },
+      monthLabel: { color: '#888', fontSize: 12 },
+      yearLabel: { show: false },
+    },
+    series: [{
+      type: 'heatmap', coordinateSystem: 'calendar',
+      data: items,
+      label: { show: false },
+    }]
+  }, true);
+}
+
+function renderAll(data) {
+  renderConversations(data.conversations);
+  renderTodos(data.todos);
+  renderFocus(data.focus);
+  renderReports(data.reports);
+  document.getElementById('lastUpdate').textContent = '上次更新: ' + new Date().toLocaleTimeString();
+}
+
+async function fetchData() {
+  try {
+    const resp = await fetch('/api/stats/summary?days=' + currentDays);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    renderAll(data);
+  } catch (e) {
+    console.error('Stats fetch error:', e);
+    document.getElementById('lastUpdate').textContent = '❌ 加载失败';
+  }
+}
+
+function switchRange(days) {
+  currentDays = days;
+  document.querySelectorAll('.controls button').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.days) === days);
+  });
+  // Reset chart containers for empty-state fallback
+  document.getElementById('chartFocus').innerHTML = '';
+  document.getElementById('chartReports').innerHTML = '';
+  document.getElementById('chartTodos').innerHTML = '';
+  fetchData();
+}
+
+window.addEventListener('resize', () => {
+  Object.values(charts).forEach(ch => ch && ch.resize());
+});
+
+initCharts();
+fetchData();
+refreshTimer = setInterval(fetchData, 30000);
+</script>
+</body>
+</html>

@@ -28,7 +28,7 @@ from PyQt5.QtCore import (
     QUrl,
     pyqtSignal,
 )
-from PyQt5.QtGui import QColor, QPainter, QPixmap
+from PyQt5.QtGui import QColor, QIcon, QPainter, QPixmap
 from PyQt5.QtNetwork import QAbstractSocket
 from frontend.idle_detector import get_idle_seconds
 from frontend.pet_animator import (
@@ -36,6 +36,9 @@ from frontend.pet_animator import (
     PetAnimator,
     detect_animation_resources,
 )
+from frontend.focus_blocker_dialog import FocusBlockerDialog
+from services.app_blocker import get_blacklist_processes
+from services.app_blocker import load_blacklist
 from PyQt5.QtWebSockets import QWebSocket
 from PyQt5.QtWidgets import (
     QFileDialog,
@@ -53,6 +56,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QMainWindow,
     QMenu,
+    QSystemTrayIcon,
     QPushButton,
     QVBoxLayout,
 )
@@ -92,6 +96,10 @@ class _PetLabel(QLabel):
             delta = event.globalPos() - self._press_pos
             parent.move(parent.pos() + delta)
             self._press_pos = event.globalPos()
+        # Drag the chat dialog along with the main window
+        pet_win = parent
+        if pet_win._chat is not None and pet_win._chat.isVisible():
+            pet_win._chat.move(pet_win.pos() + pet_win._chat_offset)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -181,6 +189,7 @@ class ChatDialog(QDialog):
         self._settings_btn = QPushButton("\u2699")
         self._settings_btn.setFixedSize(26, 26)
         self._settings_btn.setCursor(Qt.PointingHandCursor)
+        self._settings_btn.setAutoDefault(False)
         self._settings_btn.setStyleSheet(
             "QPushButton { border:none; border-radius:13px; "
             "background:rgba(0,0,0,0.1); font-size:13px; }"
@@ -212,6 +221,7 @@ class ChatDialog(QDialog):
         self._send_btn = QPushButton("\u27a4")
         self._send_btn.setFixedSize(38, 38)
         self._send_btn.setCursor(Qt.PointingHandCursor)
+        self._send_btn.setDefault(True)
         self._send_btn.setStyleSheet(
             "QPushButton { border:none; border-radius:19px;"
             " background:#4CAF50; color:white; font-size:18px; }"
@@ -560,7 +570,56 @@ class SettingsDialog(QDialog):
         grp_layout.addWidget(icon_hint)
 
         layout.addWidget(grp)
-        layout.addStretch(1)
+        layout.addSpacing(8)
+
+        # ---- Focus mode ----
+        focus_grp = QGroupBox("专注模式")
+        focus_grp.setStyleSheet("font-size:13px; font-weight:500;")
+        focus_lay = QVBoxLayout(focus_grp)
+        focus_lay.setSpacing(6)
+        self._focus_cb = QCheckBox("启用专注模式（黑名单进程拦截）")
+        self._focus_cb.setStyleSheet("font-size:12px; color:#333;")
+        focus_lay.addWidget(self._focus_cb)
+        focus_hint = QLabel("启用后每30秒自动检测并终止黑名单中的进程，助你保持专注。")
+        focus_hint.setStyleSheet("font-size:11px; color:#999;")
+        focus_hint.setWordWrap(True)
+        focus_lay.addWidget(focus_hint)
+        layout.addWidget(focus_grp)
+        layout.addSpacing(8)
+
+        # ---- Blacklist manager ----
+        self._blk_btn = QPushButton("\u9ed1\u540d\u5355\u7ba1\u7406")
+        self._blk_btn.setCursor(Qt.PointingHandCursor)
+        self._blk_btn.setStyleSheet(
+            "QPushButton { border:1px solid #666; border-radius:6px;"
+            " padding:8px 16px; background:rgba(255,255,255,0.05);"
+            " color:#ccc; font-size:12px; }"
+            "QPushButton:hover { background:rgba(255,255,255,0.1); color:#fff; }"
+        )
+        self._blk_btn.clicked.connect(self._on_manage_blacklist)
+        layout.addWidget(self._blk_btn)
+        layout.addSpacing(4)
+
+        # ---- Auto start ----
+        import sys as _sys
+        if _sys.platform == "win32":
+            self._autostart_cb = QCheckBox("开机自启")
+            self._autostart_cb.setStyleSheet("font-size:12px; color:#ccc;")
+            try:
+                import winreg
+                k = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                    r"Software\Microsoft\Windows\CurrentVersion\Run",
+                    0, winreg.KEY_READ)
+                try:
+                    winreg.QueryValueEx(k, "AIDesktopPet")
+                    self._autostart_cb.setChecked(True)
+                except FileNotFoundError:
+                    pass
+                winreg.CloseKey(k)
+            except Exception:
+                pass
+            layout.addWidget(self._autostart_cb)
+            layout.addSpacing(4)
 
         # ---- Buttons ----
         self._save_btn = QPushButton("\u4fdd\u5b58")
@@ -601,6 +660,9 @@ class SettingsDialog(QDialog):
                 thumb = pm.scaled(56, 56, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self._preview.setPixmap(thumb)
                 self._preview.setText("")
+        # Load focus mode state
+        s_focus = QSettings("MyApp", "AIDesktopPet")
+        self._focus_cb.setChecked(s_focus.value("focus_mode_enabled", False, bool))
 
     def _on_select_icon(self):
         """Open file dialog to choose a pet image."""
@@ -628,6 +690,21 @@ class SettingsDialog(QDialog):
         """Save personality + pet icon to QSettings and accept."""
         s = QSettings("MyApp", "AIDesktopPet")
         s.setValue("personality", self._editor.toPlainText())
+        s.setValue("focus_mode_enabled", self._focus_cb.isChecked())
+        import sys as _sys2
+        if _sys2.platform == "win32" and hasattr(self, "_autostart_cb"):
+            import winreg
+            import os
+            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
+            exe = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "run.py"))
+            if self._autostart_cb.isChecked():
+                winreg.SetValueEx(k, "AIDesktopPet", 0, winreg.REG_SZ, exe)
+            else:
+                try:
+                    winreg.DeleteValue(k, "AIDesktopPet")
+                except FileNotFoundError:
+                    pass
+            winreg.CloseKey(k)
         if self._selected_icon is not None:
             s.setValue("pet_icon_data", _icon_to_b64(self._selected_icon))
         else:
@@ -635,6 +712,8 @@ class SettingsDialog(QDialog):
         s.sync()
         self.accept()
 
+    def _on_manage_blacklist(self) -> None:
+        __import__("frontend.blacklist_manager", fromlist=["BlacklistManagerDialog"]).BlacklistManagerDialog(self).exec_()
 
 
 class PetWindow(QMainWindow):
@@ -666,6 +745,7 @@ class PetWindow(QMainWindow):
         self.customContextMenuRequested.connect(self._show_context_menu)
 
         self._chat = None
+        self._chat_offset = QPoint(0, 0)
         self._phase = None
         self._custom_icon_active = False
         self._apply_phase()
@@ -679,6 +759,19 @@ class PetWindow(QMainWindow):
         self._idle_timer = QTimer(self)
         self._idle_timer.timeout.connect(self._check_idle)
         self._idle_timer.start(7_000)  # 5 min
+
+        # -- Focus mode blacklist blocker --
+        self._blacklist: list[str] = load_blacklist()
+        s = QSettings("MyApp", "AIDesktopPet")
+        self.focus_mode_enabled: bool = s.value("focus_mode_enabled", False, bool)
+        self._blocker_timer = QTimer(self)
+        self._blocker_timer.timeout.connect(self._check_blacklist)
+        self._blocker_timer.start(30_000)
+        self._blocker_active = False
+        logger = __import__("logging").getLogger(__name__)
+        logger.info("Focus blocker initialized (interval=30s, blacklist=%s)", self._blacklist)
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self._setup_tray()
 
     # -- Day / night ------------------------------------------------
 
@@ -699,14 +792,89 @@ class PetWindow(QMainWindow):
         if self._chat is None:
             self._chat = ChatDialog(self.geometry().topLeft(), parent_win=self)
             self._chat.destroyed.connect(self._on_chat_destroyed)
+            self._chat_offset = self._chat.pos() - self.pos()
         QTimer.singleShot(1500, self._do_idle_greeting)
+
+
+    def _check_blacklist(self) -> None:
+        """Periodic check: if focus mode is on, scan for blacklisted processes
+        and show the blocker dialog if any are found.
+        """
+        _s = QSettings("MyApp", "AIDesktopPet")
+        if not _s.value("focus_mode_enabled", False, bool):
+            return
+        if not self._blacklist:
+            return
+        procs = get_blacklist_processes(self._blacklist)
+        if not procs:
+            return
+        if self._blocker_active:
+            return
+        self._blocker_active = True
+        logger = __import__("logging").getLogger(__name__)
+        logger.info("Focus blocker: detected %d blacklisted process(es)", len(procs))
+        try:
+            dlg = FocusBlockerDialog(procs, self)
+            dlg.exec_()
+        except Exception:
+            logger.exception("Focus blocker dialog error")
+        finally:
+            self._blocker_active = False
+    def _setup_tray(self) -> None:
+        icon_path = IMG_DIR / "day.png"
+        if icon_path.exists():
+            icon = QIcon(str(icon_path))
+        else:
+            pm = QPixmap(64, 64)
+            pm.fill(Qt.transparent)
+            with QPainter(pm) as p:
+                p.setRenderHint(QPainter.Antialiasing)
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(100, 180, 255))
+                p.drawEllipse(4, 4, 56, 56)
+            icon = QIcon(pm)
+        self.tray_icon = QSystemTrayIcon(icon, self)
+        tray_menu = QMenu(self)
+        self._show_action = tray_menu.addAction("显示/隐藏")
+        self._show_action.triggered.connect(self._toggle_visible)
+        tray_menu.addSeparator()
+        quit_action = tray_menu.addAction("退出")
+        quit_action.triggered.connect(QApplication.quit)
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self._on_tray_activated)
+        self.tray_icon.show()
+
+    def _toggle_visible(self) -> None:
+        if self.isVisible():
+            self.hide()
+        else:
+            self.show()
+            self.raise_()
+            self.activateWindow()
+
+    def _on_tray_activated(self, reason: int) -> None:
+        if reason == QSystemTrayIcon.DoubleClick:
+            self._toggle_visible()
+
+    def closeEvent(self, event) -> None:
+        event.ignore()
+        self.hide()
+        if hasattr(self, "tray_icon") and self.tray_icon and QSystemTrayIcon.supportsMessages():
+            self.tray_icon.showMessage(
+                "AI Desktop Pet",
+                "程序已最小化到托盘",
+                QSystemTrayIcon.Information,
+                2000
+            )
 
     def _do_idle_greeting(self):
         """Send greeting with current activity context; show badge (retry if WS not ready)."""
         if self._chat is None:
             return
         activity = __import__("perception", fromlist=["get_active_window_title"]).get_active_window_title()
-        ok = self._chat.send_idle_greeting(activity)
+        category = __import__("perception", fromlist=["classify_window"]).classify_window(activity)
+        context = f"\u5f53\u524d\u5206\u7c7b: {category}\uff0c\u7a97\u53e3\u6807\u9898: {activity or '\u672a\u77e5'}"
+        ok = self._chat.send_idle_greeting(context)
         if ok:
             self.set_unread_status(True)
         elif getattr(self, '_idle_greet_retry', 0) < 3:
@@ -864,6 +1032,7 @@ class PetWindow(QMainWindow):
         dlg.destroyed.connect(self._on_chat_destroyed)
         dlg.show()
         self._chat = dlg
+        self._chat_offset = dlg.pos() - self.pos()
 
     def _on_chat_destroyed(self):
         try:

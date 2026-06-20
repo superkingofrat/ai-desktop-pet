@@ -100,3 +100,52 @@ def capture_screen_and_save(path: str | Path | None = None) -> str | None:
         return str(path)
     except Exception:
         return None
+
+
+# Window classification
+
+PROGRAMMING_KEYWORDS = [
+    "vscode", "visual studio", "visualstudio", "code",
+    "pycharm", "intellij", "idea", "webstorm", "goland", "datagrip",
+    "eclipse", "xcode", "android studio", "androidstudio",
+    "github", "gitlab", "stack overflow", "stackoverflow",
+    "terminal", "cmd", "powershell", "wsl", "bash",
+    "终端", "命令行",
+    "jupyter", "notebook", "python", "javascript", "typescript",
+    "docker", "kubernetes", "k8s", "vim", "neovim", "emacs",
+    "sublime", "atom", "clion", "rider", "rust",
+]
+
+OFFICE_KEYWORDS = [
+    "word", "excel", "powerpoint", "ppt", "outlook", "onenote",
+    "钉钉", "dingtalk", "飞书", "feishu", "lark",
+    "teams", "microsoft teams", "slack", "discord",
+    "邮件", "mail", "thunderbird", "foxmail",
+    "wps", "企业微信", "wecom",
+    "notion", "evernote", "印象笔记",
+]
+
+
+def classify_window(title: str | None) -> str:
+    """Classify a window title into a category.
+
+    Returns one of:
+        "programming"   - IDE, terminal, GitHub, etc.
+        "entertainment"  - Bilibili, YouTube, Steam, etc.
+        "office"         - Word, Excel, Teams, DingTalk, etc.
+        "other"          - unrecognised / empty
+    """
+    if not title:
+        return "other"
+
+    if is_entertainment_app(title):
+        return "entertainment"
+
+    lower = title.lower()
+    for kw in PROGRAMMING_KEYWORDS:
+        if kw in lower:
+            return "programming"
+    for kw in OFFICE_KEYWORDS:
+        if kw in lower:
+            return "office"
+    return "other"

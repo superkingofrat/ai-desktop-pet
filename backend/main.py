@@ -10,11 +10,13 @@ import asyncio
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
 from backend.core.config import settings
+from backend.api.stats import router as stats_router
 from perception import get_active_window_title, is_entertainment_app
 
 FOCUS_THRESHOLD = 900  # 15 min
@@ -80,6 +82,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AI Assistant", version="0.1.0", lifespan=lifespan)
 
+_FRONTEND_DIR = __import__("os").path.join(__import__("os").path.dirname(__file__), "..", "frontend")
+if __import__("os").path.isdir(_FRONTEND_DIR):
+    app.mount("/dashboard", StaticFiles(directory=_FRONTEND_DIR, html=True), name="dashboard")
+    logger.info("Dashboard mounted at /dashboard")
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -87,6 +95,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(stats_router)
 
 
 @app.get("/health")

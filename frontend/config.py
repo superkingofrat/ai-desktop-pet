@@ -1,9 +1,13 @@
-"""Frontend configuration — resolves backend WebSocket URL."""
-
+"""Frontend configuration — resolves backend WebSocket URL and app settings."""
 from __future__ import annotations
 
 import os
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+_PROJECT_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(_PROJECT_DIR / '.env')
 
 
 def _get_project_root() -> Path:
@@ -58,3 +62,14 @@ def get_chat_ws_url() -> str:
     host = get_backend_host()
     port = get_backend_port()
     return f"ws://{host}:{port}/ws/chat"
+
+
+def get_app_blacklist() -> list[str]:
+    """Return the focus-mode process blacklist from environment.
+
+    Reads ``APP_BLACKLIST`` as a comma-separated string and returns
+    a list of lowercased, stripped process names.  Returns an empty
+    list when the env var is unset or empty.
+    """
+    raw = os.environ.get("APP_BLACKLIST", "")
+    return [name.strip().lower() for name in raw.split(",") if name.strip()]
