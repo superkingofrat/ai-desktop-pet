@@ -36,16 +36,11 @@ text
 
     DEEPSEEK_API_KEY=sk-xxxxx
 
-4. 启动后端
+
+4. 启动桌面宠物
 
 bash
 
-    python main.py
-
-5. 启动桌面宠物（新开终端）
-
-bash
-
-    python pet.py
+    python run.py
 
 双击右下角宠物图标即可对话。
